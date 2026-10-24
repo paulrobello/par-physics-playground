@@ -4,9 +4,17 @@
  */
 import type { Camera, CameraState } from "./camera";
 import type { SimClock } from "./clock";
+import { buildDemoScene } from "./demo-scene";
 import type { BodyShape } from "./document";
+import type { RopeChainSpawned } from "./interaction";
+import { placeRopeChain } from "./interaction";
+import type { JointEntity, JointParams } from "./joint";
+import { localPointToWorld, makeJoint, makePlacedJoint } from "./joint";
 import type { Material } from "./material";
+import { MATERIAL_DEFAULT_ID } from "./material";
 import type { TimeScale } from "./sim-controls";
+import type { ThrusterEntity } from "./thruster";
+import { THRUSTER_DEFAULT_STRENGTH } from "./thruster";
 import type { ToolSession } from "./tools";
 import type { UndoStack } from "./undo";
 import type { DocumentId, PhysicsWorld } from "./world";
@@ -85,6 +93,102 @@ export interface DebugApi {
 	undoDepth(): { undo: number; redo: number };
 	/** Currently selected body ids (live selection set of the tool session). */
 	selectedIds(): DocumentId[];
+	/**
+	 * Place a pin (revolute) joint at world point (x, y) between two bodies,
+	 * or between bodyA and the world when bodyBId is null. Same document path
+	 * as the joint tool (makeJoint + world.spawnJoint); false when refused
+	 * (missing body). The e2e/constraint assertions use it for deterministic
+	 * placement without pointer synthesis.
+	 */
+	placePin(
+		id: DocumentId,
+		bodyAId: DocumentId,
+		bodyBId: DocumentId | null,
+		x: number,
+		y: number,
+	): boolean;
+	/**
+	 * Place any P4-T2/T3/T4 attached joint (pin/weld/rod/slider/motor/spring)
+	 * from two world anchor points: `ax, ay` is the anchor on bodyA (the
+	 * tool's arming click), `bx, by` the anchor on bodyB (or the world point
+	 * when bodyBId is null). Rod length = |b − a|; slider axis =
+	 * normalize(b − a) with the default limits; weld preserves the placement
+	 * relative rotation; motor takes the default drive params, ON; spring
+	 * rest length = |b − a| with the default stiffness/damping. Same document
+	 * path as the joint tool (makePlacedJoint + spawnJoint); false when
+	 * refused. Test-only path: it bypasses undo bookkeeping exactly like
+	 * placePin.
+	 */
+	placeJoint(
+		id: DocumentId,
+		kind: "pin" | "weld" | "rod" | "slider" | "motor" | "spring",
+		bodyAId: DocumentId,
+		bodyBId: DocumentId | null,
+		ax: number,
+		ay: number,
+		bx: number,
+		by: number,
+	): boolean;
+	/**
+	 * Spawn a rope chain (P4-T4) from stroke points: same path as the tool
+	 * (placeRopeChain). An endpoint whose capture id is given captures to
+	 * that body; an omitted capture id pins that end to the WORLD at the
+	 * endpoint (matching the tool's empty-space semantics). Null when
+	 * refused (D17 bounds — the rejection is surfaced visibly).
+	 */
+	spawnRope(
+		points: readonly { x: number; y: number }[],
+		captureA?: DocumentId,
+		captureB?: DocumentId,
+	): RopeChainSpawned | null;
+	/** All joint ids, in document order. */
+	jointIds(): DocumentId[];
+	/** A joint's document entity (plain data), or undefined. */
+	joint(id: DocumentId): JointEntity | undefined;
+	/**
+	 * Replace a joint's params (the panel-edit path, ONE-shot; the impulse
+	 * joint is re-materialized from stored anchors). Test/e2e hook for motor
+	 * drive params and the toggle. False when refused.
+	 */
+	setJointParams(id: DocumentId, params: JointParams): boolean;
+	/**
+	 * Mount a thruster (P4-T5) on `bodyId` at world point (x, y), thrusting
+	 * at `angleDeg` degrees (y-down screen convention). Same document path as
+	 * the future tool placement will be; false when the body is missing.
+	 */
+	placeThruster(
+		id: DocumentId,
+		bodyId: DocumentId,
+		x: number,
+		y: number,
+		angleDeg: number,
+		strength?: number,
+		on?: boolean,
+	): boolean;
+	/** Replace a thruster's mutable state (strength / on). False when refused. */
+	setThrusterParams(
+		id: DocumentId,
+		patch: { strength?: number; on?: boolean },
+	): boolean;
+	/** All thruster ids, in document order. */
+	thrusterIds(): DocumentId[];
+	/** A thruster's document entity (plain data), or undefined. */
+	thruster(id: DocumentId): ThrusterEntity | undefined;
+	/** Live world pose (anchor point + thrust direction) of a thruster. */
+	thrusterPose(
+		id: DocumentId,
+	): { x: number; y: number; angle: number } | undefined;
+	/** Load the built-in demo scene (P4-T5) through the ordinary restore path. */
+	loadDemo(): void;
+	/**
+	 * Live world positions of a joint's two anchor points — coincident while
+	 * the revolute constraint holds (the e2e relative-pose assertion).
+	 */
+	jointAnchorWorld(
+		id: DocumentId,
+	):
+		| { anchorA: { x: number; y: number }; anchorB: { x: number; y: number } }
+		| undefined;
 	/** Current tick count (advanceTime determinism check). */
 	tick(): number;
 	/** World coordinates under a screen position (CSS pixels, canvas-relative). */
@@ -191,6 +295,125 @@ export function installDebugApi(
 		},
 		selectedIds() {
 			return [...session.selectedIds];
+		},
+		placePin(id, bodyAId, bodyBId, x, y) {
+			const a = world.bodies.get(bodyAId);
+			const b = bodyBId ? world.bodies.get(bodyBId) : null;
+			if (!a || (bodyBId && !b)) return false;
+			return world.spawnJoint(
+				makeJoint(
+					id,
+					{ kind: "pin" },
+					bodyAId,
+					bodyBId,
+					{ x, y },
+					{
+						x: a.translation().x,
+						y: a.translation().y,
+						rot: a.rotation(),
+					},
+					b
+						? {
+								x: b.translation().x,
+								y: b.translation().y,
+								rot: b.rotation(),
+							}
+						: null,
+				),
+			);
+		},
+		jointIds() {
+			return world.jointEntities().map((e) => e.id);
+		},
+		placeJoint(id, kind, bodyAId, bodyBId, ax, ay, bx, by) {
+			const a = world.bodies.get(bodyAId);
+			const b = bodyBId ? world.bodies.get(bodyBId) : null;
+			if (!a || (bodyBId && !b)) return false;
+			const entity = makePlacedJoint(
+				id,
+				kind,
+				bodyAId,
+				bodyBId,
+				{ x: ax, y: ay },
+				{ x: bx, y: by },
+				{
+					x: a.translation().x,
+					y: a.translation().y,
+					rot: a.rotation(),
+				},
+				b
+					? {
+							x: b.translation().x,
+							y: b.translation().y,
+							rot: b.rotation(),
+						}
+					: null,
+			);
+			return entity ? world.spawnJoint(entity) : false;
+		},
+		spawnRope(points, captureA, captureB) {
+			return placeRopeChain(world, {
+				points,
+				captureA,
+				captureB,
+				materialId: MATERIAL_DEFAULT_ID,
+			});
+		},
+		joint(id) {
+			const e = world.doc.get(id);
+			return e?.kind === "joint" ? e : undefined;
+		},
+		setJointParams(id, params) {
+			return world.updateJointParams(id, params);
+		},
+		placeThruster(id, bodyId, x, y, angleDeg, strength, on) {
+			return world.spawnThruster({
+				kind: "thruster",
+				id,
+				bodyId,
+				anchorX: x,
+				anchorY: y,
+				angle: (angleDeg * Math.PI) / 180,
+				strength: strength ?? THRUSTER_DEFAULT_STRENGTH,
+				on: on ?? true,
+			});
+		},
+		setThrusterParams(id, patch) {
+			return world.updateThruster(id, patch);
+		},
+		thrusterIds() {
+			return world.thrusterEntities().map((t) => t.id);
+		},
+		thruster(id) {
+			const e = world.doc.get(id);
+			return e?.kind === "thruster" ? e : undefined;
+		},
+		thrusterPose(id) {
+			const e = world.doc.get(id);
+			return e?.kind === "thruster" ? world.thrusterPose(e) : undefined;
+		},
+		loadDemo() {
+			world.restoreSnapshot(buildDemoScene());
+		},
+		jointAnchorWorld(id) {
+			const e = world.doc.get(id);
+			if (e?.kind !== "joint") return undefined;
+			const a = world.jointWorldAnchor(e);
+			if (!a) return undefined;
+			// anchorB: bodyB-local → world; a null bodyB stores the world point.
+			const bBody = e.bodyB ? world.bodies.get(e.bodyB) : undefined;
+			if (e.bodyB !== null && !bBody) return undefined;
+			const anchorB =
+				e.bodyB === null || !bBody
+					? { x: e.anchorB.x, y: e.anchorB.y }
+					: localPointToWorld(
+							e.anchorB.x,
+							e.anchorB.y,
+							bBody.translation().x,
+							bBody.translation().y,
+							bBody.rotation(),
+						);
+			return { anchorA: a, anchorB };
 		},
 		tick() {
 			return clock.tick;

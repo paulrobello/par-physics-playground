@@ -8,11 +8,14 @@ import { Camera } from "./lib/camera";
 import { attachCameraControls } from "./lib/camera-controls";
 import { SimClock } from "./lib/clock";
 import { installDebugApi } from "./lib/debug-api";
+import { buildDemoScene } from "./lib/demo-scene";
+import { markDemoSceneSeen, shouldLoadDemoScene } from "./lib/first-run";
 import {
 	attachToolControls,
 	CURSOR_DRAW,
 	createToolEvents,
 } from "./lib/interaction";
+import { attachJointPanel } from "./lib/joint-panel";
 import { MATERIAL_DEFAULT_ID } from "./lib/material";
 import { attachMaterialPanel } from "./lib/material-panel";
 import { createMaterialStore } from "./lib/material-store";
@@ -21,7 +24,9 @@ import {
 	bodiesInRect,
 	type PickableBody,
 	pickBody,
+	pickJoint,
 	pickLabel,
+	pickThruster,
 	ToolSession,
 } from "./lib/tools";
 import { UndoStack } from "./lib/undo";
@@ -35,6 +40,8 @@ const canvas: HTMLCanvasElement = stage;
 
 /** Debug mode freezes the real-time feed; `advanceTime` drives the sim deterministically. */
 let clock: SimClock | null = null;
+/** Per-frame refresh for the joint panel section (set at panel attach). */
+let refreshJointPanel: (() => void) | null = null;
 /** Live physics world, built asynchronously at boot. */
 let world: PhysicsWorld | null = null;
 /** Tool state machine; built with the world. */
@@ -91,6 +98,30 @@ function listPickableLabels(): {
 	}));
 }
 
+/** Joints with live glyph positions (pick order, topmost last). */
+function listPickableJoints(): { id: string; wx: number; wy: number }[] {
+	const w = world;
+	if (!w) return [];
+	const out: { id: string; wx: number; wy: number }[] = [];
+	for (const e of w.jointEntities()) {
+		const anchor = w.jointWorldAnchor(e);
+		if (anchor) out.push({ id: e.id, wx: anchor.x, wy: anchor.y });
+	}
+	return out;
+}
+
+/** Thrusters with live glyph positions (pick order, topmost last). */
+function listPickableThrusters(): { id: string; wx: number; wy: number }[] {
+	const w = world;
+	if (!w) return [];
+	const out: { id: string; wx: number; wy: number }[] = [];
+	for (const t of w.thrusterEntities()) {
+		const pose = w.thrusterPose(t);
+		if (pose) out.push({ id: t.id, wx: pose.x, wy: pose.y });
+	}
+	return out;
+}
+
 const sceneView = {
 	forEachBody(
 		fn: (
@@ -119,6 +150,33 @@ const sceneView = {
 			);
 		}
 	},
+	forEachJoint(
+		fn: (
+			id: string,
+			jointType: string,
+			wx: number,
+			wy: number,
+			motorOn: boolean,
+			wx2: number,
+			wy2: number,
+		) => void,
+	): void {
+		const w = world;
+		if (!w) return;
+		for (const e of w.jointEntities()) {
+			const anchors = w.jointWorldAnchors(e);
+			if (anchors)
+				fn(
+					e.id,
+					e.jointType,
+					anchors.a.x,
+					anchors.a.y,
+					e.params.kind === "motor" ? e.params.on : true,
+					anchors.b.x,
+					anchors.b.y,
+				);
+		}
+	},
 	forEachLabel(
 		fn: (id: string, x: number, y: number, rot: number, text: string) => void,
 	): void {
@@ -126,6 +184,22 @@ const sceneView = {
 		if (!w) return;
 		for (const label of w.labels())
 			fn(label.id, label.x, label.y, label.rot, label.text);
+	},
+	forEachThruster(
+		fn: (
+			id: string,
+			wx: number,
+			wy: number,
+			angle: number,
+			on: boolean,
+		) => void,
+	) {
+		const w = world;
+		if (!w) return;
+		for (const t of w.thrusterEntities()) {
+			const pose = w.thrusterPose(t);
+			if (pose) fn(t.id, pose.x, pose.y, pose.angle, t.on);
+		}
 	},
 	preview() {
 		return session?.preview() ?? null;
@@ -151,6 +225,7 @@ const renderer = createRenderer(canvas, {
 		// 60Hz tick is unchanged, and the debug advanceTime path (which steps
 		// ticks directly) never sees the scale — determinism guard, pinned in e2e.
 		clock?.advanceRealTime(dtSeconds * timeScale.value);
+		refreshJointPanel?.();
 	},
 });
 attachCameraControls(
@@ -182,6 +257,16 @@ void (async () => {
 	const w = await PhysicsWorld.create();
 	simClock.subscribe(() => w.step());
 	world = w;
+	// Demo scene (P4-T5, PRD D16): preloads on first run (persisted flag);
+	// `?demo=1` forces the load in debug mode as the deterministic e2e hook,
+	// and `?debug=1` alone skips the preload so deterministic test pages
+	// always boot with an empty world.
+	const forceDemo =
+		new URLSearchParams(window.location.search).get("demo") === "1";
+	if (forceDemo || (!debugEnabled && shouldLoadDemoScene(localStorage))) {
+		w.restoreSnapshot(buildDemoScene());
+		markDemoSceneSeen(localStorage);
+	}
 	// Undo/redo over the document: serialize always folds the LIVE sim state
 	// into the document first (Ruling 14) so undo restores what the user saw;
 	// restore rebuilds Rapier from the snapshot and clears the selection.
@@ -216,6 +301,8 @@ void (async () => {
 	session = new ToolSession(
 		events,
 		(wx, wy) =>
+			pickJoint(listPickableJoints(), wx, wy, camera.zoom) ??
+			pickThruster(listPickableThrusters(), wx, wy, camera.zoom) ??
 			pickLabel(listPickableLabels(), wx, wy, camera.zoom) ??
 			pickBody(listPickableBodies(), wx, wy),
 		(rect) =>
@@ -229,6 +316,33 @@ void (async () => {
 	if (debugEnabled) simClock.setPaused(true);
 	const topBar = document.querySelector<HTMLElement>("#top-bar");
 	if (!topBar) throw new Error("#top-bar missing from index.html");
+	// Demo / New-empty-world scene actions (P4-T5, D16): loading the demo
+	// replaces the scene through the ordinary restoreSnapshot path and seeds
+	// a fresh undo history from it; an empty world is the same teardown the
+	// Reset button performs (drag canceled first).
+	const clearWorld = (): void => {
+		session?.cancel();
+		w.reset();
+		session?.selectedIds.clear();
+		if (session) session.hoverId = undefined;
+		undoStack.clear();
+	};
+	const loadDemo = (): void => {
+		session?.cancel();
+		w.restoreSnapshot(buildDemoScene());
+		session?.selectedIds.clear();
+		if (session) session.hoverId = undefined;
+		undoStack.clear();
+	};
+	const demoButton =
+		topBar.querySelector<HTMLButtonElement>('[data-sim="demo"]');
+	const newWorldButton = topBar.querySelector<HTMLButtonElement>(
+		'[data-sim="new-world"]',
+	);
+	if (!demoButton || !newWorldButton)
+		throw new Error("scene action buttons missing from the top bar");
+	demoButton.addEventListener("click", loadDemo);
+	newWorldButton.addEventListener("click", clearWorld);
 	attachSimControls({
 		topBar,
 		clock: simClock,
@@ -237,13 +351,7 @@ void (async () => {
 		isEditingText: () => session?.isEditingText() ?? false,
 		// Cancel any active drag first so its mouse joint is removed before the
 		// registry teardown drops the body it references.
-		onReset: () => {
-			session?.cancel();
-			w.reset();
-			session?.selectedIds.clear();
-			if (session) session.hoverId = undefined;
-			undoStack.clear();
-		},
+		onReset: clearWorld,
 	});
 	if (debugEnabled) {
 		installDebugApi(
@@ -278,6 +386,14 @@ void (async () => {
 		onActiveChange: (id) => {
 			activeMaterialId = id;
 		},
+	});
+	// Joint panel section appends to the same context panel (D15/D19); its
+	// per-frame refresh rides the renderer's rAF flow above.
+	refreshJointPanel = attachJointPanel({
+		host: contextPanel,
+		world: w,
+		session,
+		undo: undoStack,
 	});
 	clock = simClock;
 })();

@@ -14,17 +14,37 @@
  */
 import type { Camera } from "./camera";
 import { defaultBody } from "./document";
+import {
+	isPlaceableJointKind,
+	makeJoint,
+	makePlacedJoint,
+	worldPointToLocal,
+} from "./joint";
 import { MATERIAL_DEFAULT_ID } from "./material";
+import { showNotice } from "./notice";
+import {
+	buildRopeChain,
+	countRopeSegmentIds,
+	freshRopeSegmentId,
+	ROPE_LINK_SLACK,
+	ROPE_MAX_SEGMENTS_PER_CHAIN,
+	ROPE_MAX_TOTAL_SEGMENTS,
+	ROPE_SEGMENT_RADIUS,
+	ROPE_SEGMENT_SPACING,
+} from "./rope";
+import { THRUSTER_DEFAULT_STRENGTH, type ThrusterEntity } from "./thruster";
 import {
 	beamFromSegment,
 	classifyEditKey,
 	DUPLICATE_OFFSET,
 	isToolId,
+	pickBody,
 	TOOL_KEYS,
 	type ToolId,
 	type ToolSession,
 	type ToolSessionEvents,
 } from "./tools";
+import type { Vec2 } from "./triangulate";
 import type { UndoStack } from "./undo";
 import type { DocumentId, PhysicsWorld } from "./world";
 
@@ -37,6 +57,222 @@ export function freshBodyId(): DocumentId {
 	const id = `body-${nextBodyId}`;
 	nextBodyId += 1;
 	return id;
+}
+
+let nextJointId = 1;
+
+/** Fresh document id for a newly placed joint: joint-1, joint-2, ... */
+export function freshJointId(): DocumentId {
+	const id = `joint-${nextJointId}`;
+	nextJointId += 1;
+	return id;
+}
+
+let nextThrusterId = 1;
+
+/** Fresh document id for a newly mounted thruster: thruster-1, thruster-2, ... */
+export function freshThrusterId(): DocumentId {
+	const id = `thruster-${nextThrusterId}`;
+	nextThrusterId += 1;
+	return id;
+}
+
+/** Rope chain spawn spec (P4-T4): see {@link placeRopeChain}. */
+export interface RopeChainSpec {
+	readonly points: readonly Vec2[];
+	/**
+	 * Pick id under each stroke endpoint. A pick id that resolves to a live
+	 * body captures that endpoint by a pin joint; anything else (undefined,
+	 * a label or joint id) captures it to the WORLD at the endpoint point
+	 * (D18 "bodies/world").
+	 */
+	readonly captureA?: string | undefined;
+	readonly captureB?: string | undefined;
+	/**
+	 * Material the rope segment beads take (the panel's active material;
+	 * defaults to ink — the debug API omits it).
+	 */
+	readonly materialId?: string | undefined;
+}
+
+/** Ids a committed rope chain created. */
+export interface RopeChainSpawned {
+	readonly segments: readonly DocumentId[];
+	readonly joints: readonly DocumentId[];
+}
+
+/**
+ * Convert a rope stroke into a segment chain (P4-T4): resample, enforce the
+ * D17 bounds (refusal surfaces VISIBLY via the notice toast, returns null),
+ * spawn the small circle bodies, the rope-kind links, and the endpoint
+ * capture pins (body → pin to that body; otherwise pin to world). Shared by
+ * the tool path (createToolEvents) and the debug API so both produce
+ * identical documents. The undo boundary belongs to the caller: the
+ * session's pointer-down already began the action; the debug path is
+ * test-only and skips undo like placeJoint.
+ */
+export function placeRopeChain(
+	world: PhysicsWorld,
+	spec: RopeChainSpec,
+): RopeChainSpawned | null {
+	const plan = buildRopeChain(spec.points, {
+		existingTotal: countRopeSegmentIds(world.doc.ids()),
+	});
+	if (!plan.ok) {
+		showNotice(
+			plan.reason === "per-chain"
+				? `Rope rejected: a chain is limited to ${ROPE_MAX_SEGMENTS_PER_CHAIN} segments`
+				: plan.reason === "total"
+					? `Rope rejected: the scene is limited to ${ROPE_MAX_TOTAL_SEGMENTS} rope segments in total`
+					: "Rope rejected: the stroke is too short",
+		);
+		return null;
+	}
+	const transformOf = (
+		id: DocumentId,
+	): { x: number; y: number; rot: number } | undefined => {
+		const b = world.bodies.get(id);
+		return b
+			? { x: b.translation().x, y: b.translation().y, rot: b.rotation() }
+			: undefined;
+	};
+	const resolveCapture = (pickId: string | undefined): DocumentId | null =>
+		pickId && world.bodies.has(pickId) ? pickId : null;
+	const capA = resolveCapture(spec.captureA);
+	const capB = resolveCapture(spec.captureB);
+	/**
+	 * A bead whose center lands STRICTLY INSIDE a capture target gets ejected
+	 * by the deep-penetration contact, and the violent repeated impulses tear
+	 * the end links (measured: end links at 3.5× link length). The pinned end
+	 * bead itself is fine (its pair with the target is contacts-off via the
+	 * capture pin), so every interior bead inside the target is dropped and
+	 * the link across the gap takes the placed distance × slack.
+	 */
+	const insideCapture = (p: Vec2, bodyId: DocumentId): boolean => {
+		const shape = world.shapeOf(bodyId);
+		const body = world.bodies.get(bodyId);
+		if (!shape || !body) return false;
+		return (
+			pickBody(
+				[
+					{
+						id: bodyId,
+						shape,
+						x: body.translation().x,
+						y: body.translation().y,
+						rot: body.rotation(),
+					},
+				],
+				p.x,
+				p.y,
+			) !== undefined
+		);
+	};
+	const centers: Vec2[] = [...plan.segments];
+	if (capA) {
+		while (centers.length > 2 && insideCapture(centers[1] as Vec2, capA)) {
+			centers.splice(1, 1);
+		}
+	}
+	if (capB) {
+		while (
+			centers.length > 2 &&
+			insideCapture(centers[centers.length - 2] as Vec2, capB)
+		) {
+			centers.splice(centers.length - 2, 1);
+		}
+	}
+	if (centers.length < 2) {
+		showNotice("Rope rejected: the stroke is too short");
+		return null;
+	}
+	const segments: DocumentId[] = [];
+	const joints: DocumentId[] = [];
+	// Segment bodies: small touching beads along the kept resampled centers.
+	for (const center of centers) {
+		const id = freshRopeSegmentId();
+		world.spawnEntity({
+			...defaultBody(
+				id,
+				{ kind: "circle", radius: ROPE_SEGMENT_RADIUS },
+				center.x,
+				center.y,
+			),
+			isStatic: false,
+			materialId: spec.materialId ?? MATERIAL_DEFAULT_ID,
+		});
+		segments.push(id);
+	}
+	// Rope links between consecutive kept beads, anchors at the bead centers.
+	// A link across a capture-trim gap spans the placed distance × slack.
+	for (let i = 1; i < segments.length; i++) {
+		const aId = segments[i - 1] as DocumentId;
+		const bId = segments[i] as DocumentId;
+		const a = centers[i - 1] as Vec2;
+		const b = centers[i] as Vec2;
+		const ta = transformOf(aId);
+		const tb = transformOf(bId);
+		if (!ta || !tb) return null;
+		const id = freshJointId();
+		const placed = Math.hypot(b.x - a.x, b.y - a.y);
+		if (
+			!world.spawnJoint(
+				makeJoint(
+					id,
+					{ kind: "rope", length: placed * ROPE_LINK_SLACK },
+					aId,
+					bId,
+					{ x: a.x, y: a.y },
+					ta,
+					tb,
+					{ x: b.x, y: b.y },
+				),
+			)
+		) {
+			return null;
+		}
+		joints.push(id);
+	}
+	// Endpoint capture (D18): a body under the endpoint captures it by a pin
+	// joint; anything else pins to the world at the endpoint point.
+	const capture = (
+		capId: DocumentId | null,
+		point: Vec2,
+		segId: DocumentId,
+	): void => {
+		const ta = transformOf(segId);
+		if (!ta) return;
+		const tb = capId ? transformOf(capId) : null;
+		if (capId && !tb) return;
+		const id = freshJointId();
+		// contactsOff: the captured bead sits half inside its target — the
+		// contact pair would fight the pin (measured: the bridge chain
+		// stretched to 2.5× link length before this rule). Lives in the
+		// params record, so rebuild restores it.
+		if (
+			!world.spawnJoint(
+				makeJoint(
+					id,
+					{ kind: "pin", contactsOff: true },
+					segId,
+					capId,
+					{ x: point.x, y: point.y },
+					ta,
+					tb ?? null,
+				),
+			)
+		) {
+			return;
+		}
+		joints.push(id);
+	};
+	capture(capA, centers[0] as Vec2, segments[0] as DocumentId);
+	capture(
+		capB,
+		centers[centers.length - 1] as Vec2,
+		segments[segments.length - 1] as DocumentId,
+	);
+	return { segments, joints };
 }
 
 /** Getters the event wiring needs from the app (pause state, live selection). */
@@ -292,7 +528,8 @@ export function createToolEvents(
 					continue;
 				}
 				const e = world.doc.get(id);
-				if (e) world.doc.setTransform(id, e.x + dx, e.y + dy, e.rot);
+				if (e && (e.kind === "body" || e.kind === "label"))
+					world.doc.setTransform(id, e.x + dx, e.y + dy, e.rot);
 			}
 			this.dragGrab = target;
 		},
@@ -315,7 +552,10 @@ export function createToolEvents(
 			beginAction();
 			this.rotateBase.clear();
 			for (const id of selectedIds()) {
-				const rot = world.bodyRotation(id) ?? world.doc.get(id)?.rot;
+				const e = world.doc.get(id);
+				const rot =
+					world.bodyRotation(id) ??
+					(e && (e.kind === "body" || e.kind === "label") ? e.rot : undefined);
 				if (rot !== undefined) this.rotateBase.set(id, rot);
 			}
 			// Rotation overrides are kinematic; works paused or running.
@@ -325,7 +565,8 @@ export function createToolEvents(
 				if (world.bodies.has(id)) world.rotateBody(id, base + delta);
 				else {
 					const e = world.doc.get(id);
-					if (e) world.doc.setTransform(id, e.x, e.y, base + delta);
+					if (e && (e.kind === "body" || e.kind === "label"))
+						world.doc.setTransform(id, e.x, e.y, base + delta);
 				}
 			}
 		},
@@ -333,6 +574,116 @@ export function createToolEvents(
 			beginAction();
 			for (const id of ids) world.removeBody(id);
 			recordAction();
+		},
+		onPlaceJoint(spec) {
+			beginAction();
+			const bodyA = world.bodies.get(spec.bodyAId);
+			const bodyB = spec.bodyBId ? world.bodies.get(spec.bodyBId) : null;
+			if (!bodyA || (spec.bodyBId && !bodyB)) {
+				// Refused placement (body gone mid-gesture): drop the undo snapshot
+				// this gesture began instead of committing a no-op.
+				deps?.cancelAction?.();
+				return undefined;
+			}
+			// T2: the tool's joint kind drives the params; makePlacedJoint is the
+			// ONE placement computation (shared with the debug API).
+			const entity = makePlacedJoint(
+				freshJointId(),
+				spec.jointKind,
+				spec.bodyAId,
+				spec.bodyBId,
+				{ x: spec.anchorX, y: spec.anchorY },
+				{ x: spec.x, y: spec.y },
+				{
+					x: bodyA.translation().x,
+					y: bodyA.translation().y,
+					rot: bodyA.rotation(),
+				},
+				bodyB
+					? {
+							x: bodyB.translation().x,
+							y: bodyB.translation().y,
+							rot: bodyB.rotation(),
+						}
+					: null,
+			);
+			if (!entity || !world.spawnJoint(entity)) {
+				deps?.cancelAction?.();
+				return undefined;
+			}
+			recordAction();
+			return entity.id;
+		},
+		onPlaceThruster(spec) {
+			beginAction();
+			const body = world.bodies.get(spec.bodyId);
+			if (!body) {
+				// Refused placement (body gone mid-gesture): drop the undo
+				// snapshot instead of committing a no-op.
+				deps?.cancelAction?.();
+				return undefined;
+			}
+			// The mount anchor is the click point in the body's local frame
+			// (the joint anchor precedent); defaults come from the thruster
+			// module, and the panel owns later edits.
+			const t = body.translation();
+			const local = worldPointToLocal(
+				spec.x,
+				spec.y,
+				t.x,
+				t.y,
+				body.rotation(),
+			);
+			const entity: ThrusterEntity = {
+				kind: "thruster",
+				id: freshThrusterId(),
+				bodyId: spec.bodyId,
+				anchorX: local.x,
+				anchorY: local.y,
+				angle: 0,
+				strength: THRUSTER_DEFAULT_STRENGTH,
+				on: true,
+			};
+			if (!world.spawnThruster(entity)) {
+				deps?.cancelAction?.();
+				return undefined;
+			}
+			recordAction();
+			return entity.id;
+		},
+		onSpawnRope(spec) {
+			// Rope stroke commit (P4-T4). The session's pointer-down already
+			// began the undo action for this gesture; a refused chain (D17
+			// bounds) drops the snapshot, a committed one records it.
+			const result = placeRopeChain(world, {
+				...spec,
+				materialId: activeMaterialId(),
+			});
+			if (result) recordAction();
+			else deps?.cancelAction?.();
+			return result;
+		},
+		onMotorGlyphClick(id) {
+			// Glyph toggle affordance (P4-T3 motor, P4-T5 thruster): the
+			// select-tool press landed on a joint/thruster glyph; a MOTOR flips
+			// its `on` state through updateJointParams, a THRUSTER through
+			// updateThruster — each inside ONE undo boundary (the toggle is
+			// undoable; rebuild carries the state). Other kinds: not consumed.
+			const e = world.doc.get(id);
+			if (e?.kind === "joint" && e.params.kind === "motor") {
+				const params = e.params;
+				beginAction();
+				world.updateJointParams(id, { ...params, on: !params.on });
+				recordAction();
+				return true;
+			}
+			if (e?.kind === "thruster") {
+				beginAction();
+				world.updateThruster(id, { on: !e.on });
+				recordAction();
+				return true;
+			}
+			return false;
 		},
 		onDuplicate(ids) {
 			beginAction();
@@ -442,6 +793,21 @@ export function attachToolControls(deps: ToolControlsDeps): () => void {
 		button.addEventListener("click", toggleStaticMode);
 	}
 
+	// Joint-kind picker (P4-T2): segmented buttons in the tool rail, visible
+	// only while the joint tool is active. Clicking sets the session's
+	// placement kind; syncToolbar mirrors it into pressed states.
+	const kindRow = toolbar.querySelector<HTMLElement>("[data-joint-kinds]");
+	const jointKindButtons = Array.from(
+		toolbar.querySelectorAll<HTMLButtonElement>("[data-joint-kind]"),
+	);
+	for (const button of jointKindButtons) {
+		button.addEventListener("click", () => {
+			const kind = button.dataset.jointKind ?? "";
+			if (isPlaceableJointKind(kind)) session.jointKind = kind;
+			syncToolbar();
+		});
+	}
+
 	// Undo/redo buttons: disabled when the respective stack is empty.
 	const undoButtons = {
 		undo: Array.from(
@@ -464,6 +830,14 @@ export function attachToolControls(deps: ToolControlsDeps): () => void {
 	function syncToolbar(): void {
 		for (const button of toolButtons) {
 			const active = button.dataset.tool === session.tool;
+			button.classList.toggle("active", active);
+			button.setAttribute("aria-pressed", active ? "true" : "false");
+		}
+		// Joint-kind picker row: visible only while the joint tool is active;
+		// its buttons mirror the session's placement kind.
+		if (kindRow) kindRow.hidden = session.tool !== "joint";
+		for (const button of jointKindButtons) {
+			const active = button.dataset.jointKind === session.jointKind;
 			button.classList.toggle("active", active);
 			button.setAttribute("aria-pressed", active ? "true" : "false");
 		}

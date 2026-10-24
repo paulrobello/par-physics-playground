@@ -10,6 +10,8 @@
 		<div id="app">
 			<header id="top-bar">
 				<h1>Par Physics Playground</h1>
+				<button type="button" class="mat-btn sim-preset-btn" data-sim="demo" title="Load the built-in demo scene (a Rube Goldberg starter machine)">Demo scene</button>
+				<button type="button" class="mat-btn sim-preset-btn" data-sim="new-world" title="Clear the world to an empty scene">New empty world</button>
 				<div class="sim-controls" role="toolbar" aria-label="Simulation controls">
 					<button type="button" class="tool-btn" data-sim="pause" aria-label="Pause simulation (P)" aria-pressed="false" title="Pause (P)">
 						<svg viewBox="0 0 16 16" aria-hidden="true"><rect x="4" y="3" width="3" height="10" rx="1" fill="currentColor"/><rect x="9" y="3" width="3" height="10" rx="1" fill="currentColor"/></svg>
@@ -51,6 +53,32 @@
 				<button type="button" class="tool-btn" data-tool="box" aria-label="Box tool (B)" aria-pressed="false" title="Box (B)">
 					<svg viewBox="0 0 16 16" aria-hidden="true"><rect x="3" y="3" width="10" height="10" rx="1" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>
 				</button>
+				<button type="button" class="tool-btn" data-tool="joint" aria-label="Joint tool (J)" aria-pressed="false" title="Joint (J) — click a body, then a second body (or empty space to anchor to world); pick the kind below">
+					<svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="4" fill="none" stroke="currentColor" stroke-width="1.5"/><circle cx="8" cy="8" r="1.5" fill="currentColor"/></svg>
+				</button>
+				<span class="joint-kinds" data-joint-kinds hidden>
+					<button type="button" class="tool-btn" data-joint-kind="pin" aria-pressed="true" title="Pin joint — free rotation about the shared pivot">
+						<svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="5" fill="none" stroke="currentColor" stroke-width="1.5"/><circle cx="8" cy="8" r="1.5" fill="currentColor"/></svg>
+					</button>
+					<button type="button" class="tool-btn" data-joint-kind="weld" aria-pressed="false" title="Weld joint — the pair moves as one rigid unit">
+						<svg viewBox="0 0 16 16" aria-hidden="true"><rect x="3.5" y="3.5" width="9" height="9" rx="1" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>
+					</button>
+					<button type="button" class="tool-btn" data-joint-kind="rod" aria-pressed="false" title="Rod joint — the pair keeps an exact distance">
+						<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 12L12 4" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><circle cx="4" cy="12" r="1.4" fill="currentColor"/><circle cx="12" cy="4" r="1.4" fill="currentColor"/></svg>
+					</button>
+					<button type="button" class="tool-btn" data-joint-kind="slider" aria-pressed="false" title="Slider joint — translation along one axis within limits">
+						<svg viewBox="0 0 16 16" aria-hidden="true"><rect x="3" y="7" width="10" height="2" fill="currentColor"/><path d="M4 4v8M12 4v8" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>
+					</button>
+					<button type="button" class="tool-btn" data-joint-kind="motor" aria-pressed="false" title="Motor joint — powered rotation at a target speed; click a placed motor's marker to toggle it">
+						<svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="5" fill="none" stroke="currentColor" stroke-width="1.5"/><circle cx="8" cy="8" r="1.5" fill="currentColor"/><path d="M11.6 5.2a4 4 0 0 1 0 5.6" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+					</button>
+					<button type="button" class="tool-btn" data-joint-kind="spring" aria-pressed="false" title="Spring joint — damped oscillation between two anchors (two clicks, like the rod)">
+						<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8h1.5l1-2.5L7.5 10.5l2-5 1.5 2.5H13" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+					</button>
+					<button type="button" class="tool-btn" data-joint-kind="rope" aria-pressed="false" title="Rope — draw a stroke; Shift snaps direction (anchored at the last point); endpoints attach to bodies or the world">
+						<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 11.5q2.5-5 5.5-2.5t5.5-3.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+					</button>
+				</span>
 				<button type="button" class="tool-btn" data-tool="circle" aria-label="Circle tool (C)" aria-pressed="false" title="Circle (C)">
 					<svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="5" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>
 				</button>
@@ -65,6 +93,9 @@
 				</button>
 				<button type="button" class="tool-btn" data-tool="text" aria-label="Text tool (T)" aria-pressed="false" title="Text (T) — click to place a label, type, Enter or Escape to commit">
 					<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 3.5h10M8 3.5V13M5.5 13h5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+				</button>
+				<button type="button" class="tool-btn" data-tool="thruster" aria-label="Thruster tool (H)" aria-pressed="false" title="Thruster (H) — click a body to mount a rocket; click its marker to toggle, tune strength in the panel">
+					<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8h7M10 8l-2.5-2M10 8l-2.5 2" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/><path d="M3 5.5v5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
 				</button>
 				<span class="tool-sep" aria-hidden="true"></span>
 				<button type="button" class="tool-btn" data-mode="static" aria-label="Static mode (S)" aria-pressed="false" title="Static mode (S) — box, circle, polygon, line and freehand spawns become terrain (infinite mass)">

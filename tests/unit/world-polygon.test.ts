@@ -25,7 +25,7 @@ describe("spawnPolygon", () => {
 		expect(spawned.x).toBeCloseTo(0, 9);
 		// Triangle's centroid: mean of vertices for equilateral-ish triangle.
 		const c = world.doc.get("tri");
-		if (!c) throw new Error("triangle not spawned");
+		if (c?.kind !== "body") throw new Error("triangle not spawned");
 		// Centroid of this triangle: area-weighted, y = (-2 + 2 + 2)/3 = 2/3.
 		expect(c.y).toBeCloseTo(2 / 3, 9);
 	}, 10_000);

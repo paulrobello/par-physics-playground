@@ -34,8 +34,9 @@ describe("SceneDocument labels", () => {
 		// setTransform moves labels like any entity.
 		expect(doc.setTransform("l1", 4, -3, 0.25)).toBe(true);
 		const moved = doc.get("l1");
-		expect(moved?.x).toBe(4);
-		expect(moved?.rot).toBeCloseTo(0.25);
+		if (moved?.kind !== "label") throw new Error("label missing");
+		expect(moved.x).toBe(4);
+		expect(moved.rot).toBeCloseTo(0.25);
 		// setLabelText rejects bodies (and unknown ids).
 		expect(doc.setLabelText("b1", "nope")).toBe(false);
 		expect(doc.setLabelText("missing", "nope")).toBe(false);

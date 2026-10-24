@@ -171,7 +171,9 @@ describe("UndoStack", () => {
 		stack.commit();
 		expect(stack.undo()).toBe(true);
 		expect(world.bodyPosition("faller")?.x).toBeCloseTo(40, 6);
-		expect(world.doc.get("faller")?.y).toBeCloseTo((live?.y ?? -50) - 30, 6);
+		const fellDoc = world.doc.get("faller");
+		const fellY = fellDoc?.kind === "body" ? fellDoc.y : Number.NaN;
+		expect(fellY).toBeCloseTo((live?.y ?? -50) - 30, 6);
 		expect(world.doc.get("other")).toBeUndefined();
 		// The rebuilt body stays dynamic after rebuild and keeps simulating.
 		expect(world.bodies.get("faller")?.isFixed()).toBe(false);

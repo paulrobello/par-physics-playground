@@ -7,12 +7,14 @@
  * open-ended; box, circle, and polygon are implemented.
  */
 
+import type { JointEntity } from "./joint";
 import {
 	MATERIAL_DEFAULT_ID,
 	MATERIAL_INK,
 	MATERIAL_PREDEFINED,
 	type Material,
 } from "./material";
+import type { ThrusterEntity } from "./thruster";
 import type { Vec2 } from "./triangulate";
 import type { DocumentId } from "./world";
 
@@ -125,8 +127,8 @@ export interface LabelEntity {
 	readonly text: string;
 }
 
-/** Anything the document stores: physics bodies and non-physical labels. */
-export type DocEntity = BodyEntity | LabelEntity;
+/** Anything the document stores: bodies, labels, joints (P4), thrusters (P4-T5). */
+export type DocEntity = BodyEntity | LabelEntity | JointEntity | ThrusterEntity;
 
 export type { Material };
 
@@ -216,12 +218,22 @@ export class SceneDocument {
 		return this.entities.delete(id);
 	}
 
-	/** Update position and rotation; false when the id is unknown. */
+	/** Update position and rotation; false when the id is unknown or is a
+	 * joint (joints carry anchors, not their own transform — they follow
+	 * their bodies) or a thruster (mounted on a body — no own transform). */
 	setTransform(id: DocumentId, x: number, y: number, rot: number): boolean {
 		const entity = this.entities.get(id);
-		if (!entity) return false;
+		if (!entity || entity.kind === "joint" || entity.kind === "thruster")
+			return false;
 		this.entities.set(id, { ...entity, x, y, rot });
 		return true;
+	}
+
+	/** The document's joints, in insertion order. */
+	joints(): JointEntity[] {
+		const out: JointEntity[] = [];
+		for (const e of this.entities.values()) if (e.kind === "joint") out.push(e);
+		return out;
 	}
 
 	/** Update a label's text; false when the id is unknown or is a body. */
@@ -230,6 +242,30 @@ export class SceneDocument {
 		if (entity?.kind !== "label") return false;
 		this.entities.set(id, { ...entity, text });
 		return true;
+	}
+
+	/**
+	 * Update a thruster's mutable state (strength/on/angle/anchor); false when
+	 * the id is unknown or not a thruster. Entities are immutable records, so
+	 * this replaces the stored entity (the setTransform pattern).
+	 */
+	updateThruster(
+		id: DocumentId,
+		patch: Partial<Omit<ThrusterEntity, "kind" | "id" | "bodyId">>,
+	): boolean {
+		const entity = this.entities.get(id);
+		if (entity?.kind !== "thruster") return false;
+		this.entities.set(id, { ...entity, ...patch });
+		return true;
+	}
+
+	/** The document's thrusters, in insertion order. */
+	thrusters(): ThrusterEntity[] {
+		const out: ThrusterEntity[] = [];
+		for (const e of this.entities.values()) {
+			if (e.kind === "thruster") out.push(e);
+		}
+		return out;
 	}
 
 	/**
@@ -258,8 +294,8 @@ export class SceneDocument {
 }
 
 /**
- * Deep copy of document entities (polygon point arrays are copied too), so
- * snapshots and restored state share no mutable aliases.
+ * Deep copy of document entities (polygon point arrays and joint sub-objects
+ * are copied too), so snapshots and restored state share no mutable aliases.
  */
 export function cloneDocEntities(entities: readonly DocEntity[]): DocEntity[] {
 	return entities.map((e) => {
@@ -269,6 +305,27 @@ export function cloneDocEntities(entities: readonly DocEntity[]): DocEntity[] {
 				shape: { ...e.shape, points: e.shape.points.map((p) => ({ ...p })) },
 			};
 		}
+		if (e.kind === "joint") {
+			return {
+				...e,
+				anchorA: { ...e.anchorA },
+				anchorB: { ...e.anchorB },
+				params: { ...e.params },
+			};
+		}
 		return { ...e };
 	});
+}
+
+/**
+ * The transform-carrying entities (bodies and labels): rubber-band selection
+ * and doc-transform code paths only see positioned entities — a joint has no
+ * transform of its own.
+ */
+export function positionedOnly(
+	entities: readonly DocEntity[],
+): (BodyEntity | LabelEntity)[] {
+	return entities.filter(
+		(e): e is BodyEntity | LabelEntity => e.kind !== "joint",
+	);
 }

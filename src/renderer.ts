@@ -9,6 +9,8 @@
  */
 
 import type { Camera } from "./lib/camera";
+import type { JointType } from "./lib/joint";
+import { jointGlyphRadius } from "./lib/joint";
 import {
 	type DrawPreview,
 	effectiveLabelFontSize,
@@ -33,6 +35,30 @@ export interface SceneView {
 	/** Non-physical labels, in document order (drawn above bodies). */
 	forEachLabel(
 		fn: (id: string, x: number, y: number, rot: number, text: string) => void,
+	): void;
+	/** Joints with their live anchor positions, in document order. */
+	forEachJoint(
+		fn: (
+			id: string,
+			jointType: string,
+			wx: number,
+			wy: number,
+			/** Motor running state (true for non-motor types). */
+			motorOn: boolean,
+			/** Live world position of the second anchor (P4-T4 rope/spring drawing). */
+			wx2: number,
+			wy2: number,
+		) => void,
+	): void;
+	/** Thrusters with their live poses, in document order (P4-T5). */
+	forEachThruster(
+		fn: (
+			id: string,
+			wx: number,
+			wy: number,
+			angle: number,
+			on: boolean,
+		) => void,
 	): void;
 	/** In-progress drawing preview geometry, or null. */
 	preview(): DrawPreview | null;
@@ -90,8 +116,19 @@ const PREVIEW_WIDTH_PX = 1.5;
 
 /** Label text color (HUD primary-text token). */
 const LABEL_COLOR = "#e6e9ee";
+/** Dimmed joint glyph color (a stopped motor marker). */
+const JOINT_OFF_COLOR = "rgba(152, 162, 179, 0.45)";
 /** Label caret shown while the text tool edits an empty label. */
 const LABEL_CARET_WIDTH_PX = 1.5;
+/**
+ * Joint glyph kinds drawn as OPEN paths (a line, not a region): Canvas fills
+ * these as zero area, so the glyph pass strokes them instead.
+ */
+const LINE_GLYPH_TYPES: ReadonlySet<string> = new Set([
+	"rod",
+	"spring",
+	"rope",
+]);
 /**
  * Static (terrain) bodies get the ground-line tone family instead of the
  * dynamic material fill: translucent slate fill + ground-line stroke, no
@@ -207,6 +244,8 @@ export function createRenderer(
 		// Bodies: drawn in the same world transform, above grid and ground line.
 		if (options.scene) {
 			drawBodies(zoom);
+			drawJoints(zoom);
+			drawThrusters(zoom);
 			drawLabels(zoom);
 			drawPreview(zoom);
 			drawRubberBand(zoom);
@@ -279,6 +318,196 @@ export function createRenderer(
 			tracePolyPath(ctx, shape.points);
 		} else {
 			ctx.arc(0, 0, shape.radius, 0, Math.PI * 2);
+		}
+	}
+
+	/**
+	 * Joints: accent ring + per-type inner glyph at the live anchor, subtle
+	 * glow (DESIGN.md accent tokens), stronger when selected. Drawn above
+	 * bodies so a pinned assembly always shows its pivots. The radius clamps
+	 * to [5, 14] CSS px on screen (shared with the picker via
+	 * jointGlyphRadius). Line-type glyphs (rod/spring/rope — open paths) are
+	 * STROKED, not filled: Canvas fills a two-point open path as zero area,
+	 * which rendered the rod glyph invisible before the T2 stroke pass.
+	 */
+	function drawJoints(zoom: number): void {
+		const scene = options.scene;
+		if (!scene) return;
+		const selected = new Set(scene.selectedIds());
+		const r = jointGlyphRadius(zoom);
+		ctx.shadowColor = HOVER_GLOW;
+		ctx.shadowBlur = HOVER_GLOW_BLUR_PX;
+		ctx.strokeStyle = ACCENT_COLOR;
+		scene.forEachJoint((id, jointType, wx, wy, motorOn, wx2, wy2) => {
+			const isSel = selected.has(id);
+			if (jointType === "rope") {
+				// Rope link (P4-T4): no ring, no inner glyph — the chain of
+				// stroked link lines IS the rope's continuous curve through the
+				// segment centers.
+				ctx.save();
+				ctx.lineWidth = (isSel ? 2 : 1.2) / zoom;
+				ctx.beginPath();
+				ctx.moveTo(wx, wy);
+				ctx.lineTo(wx2, wy2);
+				ctx.stroke();
+				ctx.restore();
+				return;
+			}
+			// A stopped motor draws dimmed (the at-a-glance on/off state the
+			// toggle affordance flips); everything else keeps the accent.
+			const dim = jointType === "motor" && !motorOn;
+			ctx.save();
+			ctx.lineWidth = (isSel ? 2 : 1.5) / zoom;
+			ctx.strokeStyle = dim ? JOINT_OFF_COLOR : ACCENT_COLOR;
+			ctx.beginPath();
+			ctx.arc(wx, wy, r, 0, Math.PI * 2);
+			ctx.stroke();
+			ctx.fillStyle = dim ? JOINT_OFF_COLOR : ACCENT_COLOR;
+			const type = jointType as JointType;
+			traceJointGlyph(ctx, type, wx, wy, r);
+			if (LINE_GLYPH_TYPES.has(type)) {
+				// Open path (a line, not a region): fill is zero-area; stroke it.
+				ctx.stroke();
+			} else {
+				ctx.fill();
+			}
+			if (type === "spring") {
+				// Coil between the anchors (P4-T4): the visible spring body.
+				traceSpringCoil(ctx, wx, wy, wx2, wy2, zoom);
+			}
+			ctx.restore();
+		});
+		ctx.shadowColor = "transparent";
+		ctx.shadowBlur = 0;
+	}
+
+	/**
+	 * Stroke a zigzag coil between two anchor points — the spring's visible
+	 * body (P4-T4). Amplitude is at least ~5 CSS px so the coil reads at any
+	 * zoom; 12 points alternate side to side along the anchor axis.
+	 */
+	function traceSpringCoil(
+		ctx: CanvasRenderingContext2D,
+		x1: number,
+		y1: number,
+		x2: number,
+		y2: number,
+		zoom: number,
+	): void {
+		const dx = x2 - x1;
+		const dy = y2 - y1;
+		const len = Math.hypot(dx, dy);
+		if (len < 1e-6) return;
+		const ux = dx / len;
+		const uy = dy / len;
+		const px = -uy;
+		const py = ux;
+		const zigs = 12;
+		const amp = Math.max(0.3, 5 / zoom);
+		ctx.beginPath();
+		ctx.moveTo(x1, y1);
+		for (let i = 1; i < zigs; i++) {
+			const t = i / zigs;
+			const sign = i % 2 === 0 ? 1 : -1;
+			ctx.lineTo(
+				x1 + ux * len * t + px * amp * sign,
+				y1 + uy * len * t + py * amp * sign,
+			);
+		}
+		ctx.lineTo(x2, y2);
+		ctx.stroke();
+	}
+
+	/**
+	 * Thrusters (P4-T5): a direction arrow at the mounted body's live anchor —
+	 * a shaft from behind the anchor to its tip, plus a filled head, screen-
+	 * constant size (scaled by 1/zoom like every other glyph), accent when
+	 * thrusting, dimmed when off (the motor-marker convention).
+	 */
+	function drawThrusters(zoom: number): void {
+		const scene = options.scene;
+		if (!scene) return;
+		const selected = new Set(scene.selectedIds());
+		const r = jointGlyphRadius(zoom);
+		ctx.shadowColor = HOVER_GLOW;
+		ctx.shadowBlur = HOVER_GLOW_BLUR_PX;
+		ctx.lineWidth = 1.5 / zoom;
+		scene.forEachThruster((id, wx, wy, angle, on) => {
+			const color = on ? ACCENT_COLOR : JOINT_OFF_COLOR;
+			ctx.strokeStyle = color;
+			ctx.fillStyle = color;
+			const ux = Math.cos(angle);
+			const uy = Math.sin(angle);
+			ctx.save();
+			if (selected.has(id)) ctx.lineWidth = 2 / zoom;
+			// Shaft from behind the anchor through it, head at the tip.
+			ctx.beginPath();
+			ctx.moveTo(wx - ux * r * 2.4, wy - uy * r * 2.4);
+			ctx.lineTo(wx + ux * r * 0.8, wy + uy * r * 0.8);
+			ctx.stroke();
+			ctx.beginPath();
+			ctx.moveTo(wx + ux * r * 2.2, wy + uy * r * 2.2);
+			ctx.lineTo(
+				wx + ux * r * 0.6 - uy * r * 1.1,
+				wy + uy * r * 0.6 + ux * r * 1.1,
+			);
+			ctx.lineTo(
+				wx + ux * r * 0.6 + uy * r * 1.1,
+				wy + uy * r * 0.6 - ux * r * 1.1,
+			);
+			ctx.closePath();
+			ctx.fill();
+			ctx.restore();
+		});
+		ctx.shadowColor = "transparent";
+		ctx.shadowBlur = 0;
+	}
+
+	/**
+	 * Per-type inner glyph inside the anchor ring (distinct icon per joint
+	 * type): pin = center dot, weld = square, slider = bar with end rails,
+	 * motor = dot with an arc tick, rod = spoke, spring/rope = zig-zag.
+	 * Path-only (the caller fills); all marks fit inside the ring.
+	 */
+	function traceJointGlyph(
+		ctx: CanvasRenderingContext2D,
+		jointType: JointType,
+		x: number,
+		y: number,
+		r: number,
+	): void {
+		const s = r * 0.45;
+		ctx.beginPath();
+		switch (jointType) {
+			case "pin":
+				ctx.arc(x, y, s * 0.6, 0, Math.PI * 2);
+				break;
+			case "weld":
+				ctx.rect(x - s, y - s, s * 2, s * 2);
+				break;
+			case "slider":
+				ctx.rect(x - s * 1.6, y - s * 0.35, s * 3.2, s * 0.7);
+				ctx.moveTo(x - s, y - s);
+				ctx.lineTo(x - s, y + s);
+				ctx.moveTo(x + s, y - s);
+				ctx.lineTo(x + s, y + s);
+				break;
+			case "motor":
+				ctx.arc(x, y, s * 0.6, 0, Math.PI * 2);
+				ctx.moveTo(x + s * 1.2, y);
+				ctx.arc(x, y, s * 1.2, 0, Math.PI / 3);
+				break;
+			case "rod":
+				ctx.moveTo(x - s, y + s);
+				ctx.lineTo(x + s, y - s);
+				break;
+			default:
+				// spring / rope: a small zig-zag across the ring
+				ctx.moveTo(x - s, y);
+				ctx.lineTo(x - s * 0.4, y - s);
+				ctx.lineTo(x + s * 0.4, y + s);
+				ctx.lineTo(x + s, y);
+				break;
 		}
 	}
 
@@ -394,6 +623,27 @@ export function createRenderer(
 			}
 		} else if (p.kind === "polygon") {
 			tracePolyPath(ctx, p.points);
+		} else if (p.kind === "joint") {
+			// Joint attach preview: accent line from the first anchor to the
+			// cursor, endpoint rings at both ends; the far end's ring is dashed
+			// when it is over empty space (world anchor).
+			ctx.save();
+			ctx.shadowColor = "transparent";
+			ctx.shadowBlur = 0;
+			ctx.beginPath();
+			ctx.moveTo(p.from.x, p.from.y);
+			ctx.lineTo(p.to.x, p.to.y);
+			ctx.stroke();
+			ctx.setLineDash(p.toBody ? [] : [3 / zoom, 2 / zoom]);
+			ctx.beginPath();
+			ctx.arc(p.to.x, p.to.y, jointGlyphRadius(zoom), 0, Math.PI * 2);
+			ctx.stroke();
+			ctx.setLineDash([]);
+			ctx.beginPath();
+			ctx.arc(p.from.x, p.from.y, jointGlyphRadius(zoom), 0, Math.PI * 2);
+			ctx.stroke();
+			ctx.restore();
+			return;
 		} else if (p.kind === "text") {
 			// In-progress label: the typed text, or a caret while empty.
 			ctx.save();

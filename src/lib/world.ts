@@ -21,7 +21,18 @@ import {
 	type Material,
 	SceneDocument,
 } from "./document";
+import {
+	type JointEntity,
+	type JointParams,
+	localPointToWorld,
+	MOTOR_VELOCITY_FACTOR,
+	ROD_DAMPING_PER_MASS,
+	ROD_STIFFNESS_PER_MASS,
+	ROPE_LINK_DAMPING_PER_MASS,
+	ROPE_LINK_STIFFNESS_PER_MASS,
+} from "./joint";
 import { MATERIAL_DEFAULT_ID } from "./material";
+import { type ThrusterEntity, thrusterWorldPose } from "./thruster";
 import {
 	cleanPolygon,
 	completeDecomposition,
@@ -66,12 +77,29 @@ export type { BodyShape } from "./document";
 const MOUSE_JOINT_STIFFNESS_PER_MASS = 400;
 const MOUSE_JOINT_DAMPING_PER_MASS = 40;
 
+/**
+ * The effective mass a rod's stiff spring must hold: the smaller dynamic mass
+ * of the pair (a fixed/ground endpoint contributes no load mass). Static-
+ * static rods are degenerate; 1 keeps the force-based constants finite.
+ */
+function rodEffectiveMass(
+	a: RAPIER.RigidBody,
+	b: RAPIER.RigidBody | null | undefined,
+): number {
+	const massA = a.isFixed() ? Number.POSITIVE_INFINITY : a.mass();
+	const massB = !b || b.isFixed() ? Number.POSITIVE_INFINITY : b.mass();
+	const mass = Math.min(massA, massB);
+	return Number.isFinite(mass) ? mass : 1;
+}
+
 export class PhysicsWorld {
 	readonly world: RAPIER.World;
 	/** Serializable document: identity, geometry, transform per body. */
 	readonly doc = new SceneDocument();
 	/** Simulation view: document id → live Rapier body. */
 	readonly bodies = new Map<DocumentId, RAPIER.RigidBody>();
+	/** Simulation view: document id → live Rapier impulse joint. */
+	readonly joints = new Map<DocumentId, RAPIER.ImpulseJoint>();
 
 	private groundBody: RAPIER.RigidBody | null = null;
 	/** Notified on every setGravity (the slider sync in sim-controls). */
@@ -177,6 +205,91 @@ export class PhysicsWorld {
 	}
 
 	/**
+	 * Create the simulation state for a thruster (P4-T5): a doc-only entity
+	 * (no Rapier body — the label precedent) mounted on an EXISTING simulated
+	 * body. False when the body is missing.
+	 */
+	spawnThruster(entity: ThrusterEntity): boolean {
+		if (!this.bodies.has(entity.bodyId)) {
+			console.warn(
+				`[par-physics] Thruster ${entity.id} rejected: body ${entity.bodyId} missing`,
+			);
+			return false;
+		}
+		this.doc.add(entity);
+		return true;
+	}
+
+	/**
+	 * Patch a thruster's mutable state (panel edits, the glyph toggle): the
+	 * force is read live from the document each tick, so no re-materialization
+	 * is needed — the document replacement IS the update. False when unknown
+	 * or not a thruster. Undo covers it through the ordinary snapshot boundary.
+	 */
+	updateThruster(
+		id: DocumentId,
+		patch: Partial<Omit<ThrusterEntity, "kind" | "id" | "bodyId">>,
+	): boolean {
+		return this.doc.updateThruster(id, patch);
+	}
+
+	/** Thruster entities mounted on body `id` (the removal cascade set). */
+	thrustersAttachedTo(id: DocumentId): ThrusterEntity[] {
+		return this.doc.thrusters().filter((t) => t.bodyId === id);
+	}
+
+	/** The document's thrusters, in insertion order. */
+	thrusterEntities(): ThrusterEntity[] {
+		return this.doc.thrusters();
+	}
+
+	/** Live world pose of a thruster's mount point and thrust direction. */
+	thrusterPose(
+		entity: ThrusterEntity,
+	): { x: number; y: number; angle: number } | undefined {
+		return thrusterWorldPose(entity, this.transformOf(entity.bodyId));
+	}
+
+	/** Live transform of a registered body (position + rotation), or undefined. */
+	transformOf(
+		id: DocumentId,
+	): { x: number; y: number; rot: number } | undefined {
+		const body = this.bodies.get(id);
+		if (!body) return undefined;
+		return {
+			x: body.translation().x,
+			y: body.translation().y,
+			rot: body.rotation(),
+		};
+	}
+
+	/**
+	 * Apply every ON thruster's continuous force at its mount point (called
+	 * from step() BEFORE the Rapier tick, so the impulse is integrated this
+	 * tick). impulse = strength·dt at the world anchor — an off-center anchor
+	 * also torques the body (a mounted rocket turns it). Wakes the body: a
+	 * sleeping body would ignore the impulse.
+	 */
+	private applyThrusters(): void {
+		for (const thruster of this.doc.thrusters()) {
+			if (!thruster.on) continue;
+			const body = this.bodies.get(thruster.bodyId);
+			if (!body) continue;
+			const pose = this.thrusterPose(thruster);
+			if (!pose) continue;
+			const impulse = thruster.strength * SIM_DT_SECONDS;
+			body.applyImpulseAtPoint(
+				{
+					x: Math.cos(pose.angle) * impulse,
+					y: Math.sin(pose.angle) * impulse,
+				},
+				{ x: pose.x, y: pose.y },
+				true,
+			);
+		}
+	}
+
+	/**
 	 * Convex polygon → one convex-hull collider; concave → ear-clipping
 	 * triangles, one collider each, all parented under the single body (Rapier
 	 * supports multiple colliders per rigid body), so a concave polygon rests
@@ -236,6 +349,260 @@ export class PhysicsWorld {
 
 	setLabelText(id: DocumentId, text: string): void {
 		this.doc.setLabelText(id, text);
+	}
+
+	/**
+	 * Create a joint from a document entity: resolve both endpoints (null
+	 * bodyB = the fixed ground body — pin-to-world), build the Rapier joint
+	 * from the stored body-local anchors, register it. The same path serves
+	 * placement AND rebuild-from-snapshot (undo/save depend on it; Ruling 22
+	 * rebuild is bodies-BEFORE-joints, which restoreSnapshot enforces).
+	 * False when an endpoint body is missing (a rebuild-order bug — callers
+	 * surface it) or the params kind has no creation branch (every phase-4
+	 * type now materializes; the branch is a loud rebuild-refusal guard).
+	 */
+	spawnJoint(entity: JointEntity): boolean {
+		const bodyA = this.bodies.get(entity.bodyA);
+		if (!bodyA) {
+			console.warn(
+				`[par-physics] Joint ${entity.id} rejected: body ${entity.bodyA} missing`,
+			);
+			return false;
+		}
+		const bodyB =
+			entity.bodyB === null ? this.groundBody : this.bodies.get(entity.bodyB);
+		if (entity.bodyB !== null && !bodyB) {
+			console.warn(
+				`[par-physics] Joint ${entity.id} rejected: body ${entity.bodyB} missing`,
+			);
+			return false;
+		}
+		let data: RAPIER.JointData;
+		// Narrowed kind for the loud-refusal message below: the switch covers
+		// every params kind, so inside `default` the discriminant is `never`.
+		const kindName: string = entity.params.kind;
+		// Switch on params.kind (=== jointType by the makeJoint invariant)
+		// so each branch sees its narrowed params record.
+		switch (entity.params.kind) {
+			case "pin":
+			case "motor":
+				// Motor (P4-T3) = the pin's revolute; the motor is configured on
+				// the CREATED impulse joint below (0.21: configureMotorVelocity /
+				// setMotorMaxForce live on UnitImpulseJoint, not JointData).
+				data = RAPIER.JointData.revolute(
+					{ x: entity.anchorA.x, y: entity.anchorA.y },
+					{ x: entity.anchorB.x, y: entity.anchorB.y },
+				);
+				break;
+			case "weld":
+				// Fixed joint preserving the placement relative rotation:
+				// Rapier enforces θA + frame1 = θB + frame2, so frame2 = 0 and
+				// frame1 = relRot keeps the placed pose exactly (no snap).
+				data = RAPIER.JointData.fixed(
+					{ x: entity.anchorA.x, y: entity.anchorA.y },
+					entity.params.relRot,
+					{ x: entity.anchorB.x, y: entity.anchorB.y },
+					0,
+				);
+				break;
+			case "rod": {
+				// Stiff spring, mass-scaled (see ROD_*_PER_MASS in joint.ts):
+				// holds the anchor distance in BOTH directions, unlike the rope
+				// joint, which the 0.21 bindings limit to max-distance-only.
+				data = RAPIER.JointData.spring(
+					entity.params.length,
+					rodEffectiveMass(bodyA, bodyB) * ROD_STIFFNESS_PER_MASS,
+					rodEffectiveMass(bodyA, bodyB) * ROD_DAMPING_PER_MASS,
+					{ x: entity.anchorA.x, y: entity.anchorA.y },
+					{ x: entity.anchorB.x, y: entity.anchorB.y },
+				);
+				break;
+			}
+			case "spring": {
+				// Rapier spring joint, per-mass constants (the rod precedent —
+				// the spring motor is force-based; per-mass keeps ω = √stiffness
+				// and the period mass-independent, see the params docs in
+				// joint.ts). Pulls AND pushes around `restLength`.
+				const m = rodEffectiveMass(bodyA, bodyB);
+				data = RAPIER.JointData.spring(
+					entity.params.restLength,
+					m * entity.params.stiffness,
+					m * entity.params.damping,
+					{ x: entity.anchorA.x, y: entity.anchorA.y },
+					{ x: entity.anchorB.x, y: entity.anchorB.y },
+				);
+				break;
+			}
+			case "rope": {
+				// Rope link (P4-T4): materialized as a stiff mass-scaled spring
+				// (ROPE_LINK_* constants) rather than JointData.rope — MEASURED
+				// in 0.21: the rope joint is a soft max-distance limit that
+				// leaks under sustained end load (a bridge's loaded end links
+				// settled at ~1.5× their placed length; a torn end hit 3.5×),
+				// while the stiff spring holds distance. A hanging or bridging
+				// chain is in pure tension, so the spring's push direction
+				// costs nothing physically.
+				const m = rodEffectiveMass(bodyA, bodyB);
+				data = RAPIER.JointData.spring(
+					entity.params.length,
+					m * ROPE_LINK_STIFFNESS_PER_MASS,
+					m * ROPE_LINK_DAMPING_PER_MASS,
+					{ x: entity.anchorA.x, y: entity.anchorA.y },
+					{ x: entity.anchorB.x, y: entity.anchorB.y },
+				);
+				break;
+			}
+			case "slider": {
+				// Prismatic with limits at JointData level (0.21 exposes
+				// limitsEnabled/limits and intoRaw passes them to the wasm).
+				data = RAPIER.JointData.prismatic(
+					{ x: entity.anchorA.x, y: entity.anchorA.y },
+					{ x: entity.anchorB.x, y: entity.anchorB.y },
+					{ x: entity.params.axisX, y: entity.params.axisY },
+				);
+				data.limitsEnabled = true;
+				data.limits = [entity.params.min, entity.params.max];
+				break;
+			}
+			default:
+				// Rebuild-refusal rule (P4-T2): a refused joint is NOT added to
+				// the document (the placement path depends on clean refusal),
+				// so a rebuild over a not-yet-materializable type would drop it.
+				// That is made LOUD here (console.error, not warn) so no entity
+				// is silently eaten; once every phase type is materialized the
+				// branch is unreachable in practice.
+				console.error(
+					`[par-physics] Joint ${entity.id}: type "${kindName}" has no materialization branch — rebuild would drop this joint`,
+				);
+				return false;
+		}
+		if (!bodyB) throw new Error("world not initialised");
+		const joint = this.world.createImpulseJoint(data, bodyA, bodyB, true);
+		if (entity.params.kind === "motor" && entity.params.on) {
+			// Powered revolute (0.21): the motor lives on the CREATED impulse
+			// joint. AccelerationBased keeps the drive mass-independent (a
+			// heavier wheel still tracks targetVelocity); setMotorMaxForce caps
+			// the drive torque in world force units — a load demanding more
+			// than maxTorque stalls the motor (pinned in
+			// tests/unit/joint-motor.test.ts). The NEGATED target is measured,
+			// not assumed: the 0.21 wasm drives ω(bodyB) − ω(bodyA) to the
+			// configured velocity, so negating makes positive targetVelocity
+			// spin bodyA forward (exact when bodyB is static or the world).
+			const revolute = joint as RAPIER.RevoluteImpulseJoint;
+			revolute.configureMotorModel(RAPIER.MotorModel.AccelerationBased);
+			revolute.setMotorMaxForce(entity.params.maxTorque);
+			revolute.configureMotorVelocity(
+				-entity.params.targetVelocity,
+				MOTOR_VELOCITY_FACTOR,
+			);
+		}
+		// Rail/axle/link semantics: a slider's rider overlaps its rail, a
+		// motorized wheel overlaps its mount, rope links' neighbors touch, and
+		// a rope capture pin's bead sits half inside its target — contacts
+		// between the jointed pair are off in all four cases; the constraint
+		// does the constraining, not contact resolution (the measured Rapier
+		// quirk from P4-T2/T3, extended to the rope in P4-T4).
+		const contactsOff =
+			entity.params.kind === "slider" ||
+			entity.params.kind === "motor" ||
+			entity.params.kind === "rope" ||
+			(entity.params.kind === "pin" && entity.params.contactsOff === true);
+		if (contactsOff) joint.setContactsEnabled(false);
+		this.doc.add(entity);
+		this.joints.set(entity.id, joint);
+		return true;
+	}
+
+	/** The document's joint entities, in insertion order. */
+	jointEntities(): JointEntity[] {
+		return this.doc.joints();
+	}
+
+	/**
+	 * Replace a joint's params and re-materialize its Rapier impulse joint
+	 * from the stored anchors (the panel's per-type controls — rod length,
+	 * slider limits). Undo covers it through the ordinary document snapshot
+	 * boundary: the entity carries the new params, so restoreSnapshot rebuilds
+	 * with them. False when the id is unknown or not a joint; a rebuild
+	 * refusal (endpoint missing) leaves the entity in the document without a
+	 * live joint and logs loud per the rebuild-refusal rule in spawnJoint.
+	 */
+	updateJointParams(id: DocumentId, params: JointParams): boolean {
+		const entity = this.doc.get(id);
+		if (entity?.kind !== "joint") return false;
+		const joint = this.joints.get(id);
+		if (joint) {
+			this.world.removeImpulseJoint(joint, true);
+			this.joints.delete(id);
+		}
+		const updated: JointEntity = { ...entity, jointType: params.kind, params };
+		this.doc.add(updated);
+		return this.spawnJoint(updated);
+	}
+
+	/**
+	 * Destroy a joint: Rapier impulse joint, registry entry, document entity.
+	 * Fires the removal notification for the joint id so selection/UI drop it.
+	 */
+	removeJoint(id: DocumentId): void {
+		const joint = this.joints.get(id);
+		if (joint) {
+			this.world.removeImpulseJoint(joint, true);
+			this.joints.delete(id);
+		}
+		this.doc.remove(id);
+		this.onRemove?.(id);
+	}
+
+	/** Joint ids whose endpoints include `id` (the removal cascade set). */
+	jointsAttachedTo(id: DocumentId): DocumentId[] {
+		const attached: DocumentId[] = [];
+		for (const e of this.doc.joints()) {
+			if (e.bodyA === id || e.bodyB === id) attached.push(e.id);
+		}
+		return attached;
+	}
+
+	/**
+	 * Live world position of a joint's anchor (glyph drawing, picking, panel):
+	 * the stored body-local anchor rotated/translated by bodyA's CURRENT
+	 * transform, so the marker follows the pinned body while the sim runs.
+	 */
+	jointWorldAnchor(entity: JointEntity): { x: number; y: number } | undefined {
+		const body = this.bodies.get(entity.bodyA);
+		if (!body) return undefined;
+		return localPointToWorld(
+			entity.anchorA.x,
+			entity.anchorA.y,
+			body.translation().x,
+			body.translation().y,
+			body.rotation(),
+		);
+	}
+
+	/**
+	 * Both anchors' live world positions (the renderer's between-anchors
+	 * drawing for springs and rope links, P4-T4). `b` is the stored world
+	 * point when bodyB is null (world anchor — the ground never moves).
+	 */
+	jointWorldAnchors(
+		entity: JointEntity,
+	): { a: { x: number; y: number }; b: { x: number; y: number } } | undefined {
+		const a = this.jointWorldAnchor(entity);
+		if (!a) return undefined;
+		const bBody = entity.bodyB ? this.bodies.get(entity.bodyB) : undefined;
+		if (entity.bodyB !== null && !bBody) return undefined;
+		const b =
+			entity.bodyB === null || !bBody
+				? { x: entity.anchorB.x, y: entity.anchorB.y }
+				: localPointToWorld(
+						entity.anchorB.x,
+						entity.anchorB.y,
+						bBody.translation().x,
+						bBody.translation().y,
+						bBody.rotation(),
+					);
+		return { a, b };
 	}
 
 	/** The document's labels, in insertion order. */
@@ -423,10 +790,31 @@ export class PhysicsWorld {
 	 * (labels, which have no Rapier body) are removed from the document.
 	 */
 	removeBody(id: DocumentId): void {
+		// Removal cascade (Ruling 22): deleting any body removes its joints
+		// first — Rapier destroys the impulse joints with the body, so the
+		// registry entries must go with them (no orphans). Joint ids fire the
+		// removal notification too, dropping selection/UI references.
+		for (const jointId of this.jointsAttachedTo(id)) this.removeJoint(jointId);
+		// Thrusters (P4-T5) mounted on the body die with it the same way — no
+		// orphan force applicators pointing at a removed body.
+		for (const thruster of this.thrustersAttachedTo(id)) {
+			this.doc.remove(thruster.id);
+			this.onRemove?.(thruster.id);
+		}
 		const body = this.bodies.get(id);
 		if (body) {
 			this.world.removeRigidBody(body);
 			this.bodies.delete(id);
+			this.doc.remove(id);
+			this.onRemove?.(id);
+			return;
+		}
+		// Doc-only entities (labels) are removed from the document; a joint id
+		// reaching removeBody directly delegates to removeJoint.
+		const entity = this.doc.get(id);
+		if (entity?.kind === "joint") {
+			this.removeJoint(id);
+			return;
 		}
 		this.doc.remove(id);
 		this.onRemove?.(id);
@@ -480,12 +868,17 @@ export class PhysicsWorld {
 	 */
 	restoreSnapshot(entities: readonly DocEntity[]): void {
 		this.reset();
+		// Bodies and labels reinsert in SNAPSHOT order (draw order and
+		// topmost-picking survive); joints spawn AFTER every body exists
+		// (Ruling 22: bodies BEFORE joints — a joint's Rapier creation needs
+		// both endpoint bodies in the registry).
 		for (const entity of entities) {
-			if (entity.kind === "body") {
-				this.spawnEntity(entity);
-			} else {
-				this.doc.add(entity);
-			}
+			if (entity.kind === "body") this.spawnEntity(entity);
+			else if (entity.kind === "label") this.doc.add(entity);
+			else if (entity.kind === "thruster") this.doc.add(entity);
+		}
+		for (const entity of entities) {
+			if (entity.kind === "joint") this.spawnJoint(entity);
 		}
 	}
 
@@ -548,11 +941,18 @@ export class PhysicsWorld {
 
 	/** Remove every entity, including terrain and labels; the ground stays. */
 	reset(): void {
-		for (const id of this.doc.ids()) this.removeBody(id);
+		// Iterate BODY/LABEL ids only: every joint dies in removeBody's cascade
+		// when its bodyA (always a body) is removed — iterating joint ids here
+		// would double-remove and re-fire notifications.
+		for (const id of this.doc.ids()) {
+			const e = this.doc.get(id);
+			if (e && e.kind !== "joint") this.removeBody(id);
+		}
 	}
 
 	/** One fixed tick: advance physics, then cull bodies below the kill threshold. */
 	step(): void {
+		this.applyThrusters();
 		this.world.step();
 		for (const [id, body] of this.bodies) {
 			if (body.translation().y > KILL_THRESHOLD_Y) {

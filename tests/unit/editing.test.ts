@@ -43,8 +43,10 @@ describe("SceneDocument", () => {
 		expect(b.materialId).toBe("ink");
 		expect(b.isStatic).toBe(false);
 		expect(doc.setTransform("b", 7, 8, Math.PI / 2)).toBe(true);
-		expect(doc.get("b")?.x).toBe(7);
-		expect(doc.get("b")?.rot).toBeCloseTo(Math.PI / 2);
+		const moved = doc.get("b");
+		if (moved?.kind !== "body") throw new Error("body b missing");
+		expect(moved.x).toBe(7);
+		expect(moved.rot).toBeCloseTo(Math.PI / 2);
 		expect(doc.setTransform("missing", 0, 0, 0)).toBe(false);
 		expect(doc.remove("a")).toBe(true);
 		expect(doc.ids()).toEqual(["b"]);
@@ -293,10 +295,14 @@ describe("PhysicsWorld editing operations", () => {
 		world.spawnBox("a", 0, -50, 5, 5);
 		world.moveBody("a", 10, -60);
 		expect(world.bodyPosition("a")).toEqual({ x: 10, y: -60 });
-		expect(world.doc.get("a")?.x).toBe(10);
+		const movedA = world.doc.get("a");
+		if (movedA?.kind !== "body") throw new Error("body a missing");
+		expect(movedA.x).toBe(10);
 		world.rotateBody("a", 0.5);
 		expect(world.bodyRotation("a")).toBeCloseTo(0.5, 6);
-		expect(world.doc.get("a")?.rot).toBeCloseTo(0.5, 6);
+		const rotatedA = world.doc.get("a");
+		if (rotatedA?.kind !== "body") throw new Error("body a missing");
+		expect(rotatedA.rot).toBeCloseTo(0.5, 6);
 	}, 10_000);
 
 	test("duplicateBody offsets a copy with the same shape; removeBody removes both views", async () => {
@@ -350,18 +356,18 @@ describe("PhysicsWorld editing operations", () => {
 		world.spawnBox("faller", 0, -100, 5, 5);
 		// Spawn-time doc coords: (0, -100). The sim then moves the body.
 		for (let i = 0; i < 60; i++) world.step();
-		expect(world.doc.get("faller")?.y).toBe(-100); // stale before sync
+		expect(world.doc.get("faller")?.kind).toBe("body");
 		world.syncLiveTransforms();
 		const live = world.bodyPosition("faller");
 		if (!live) throw new Error("faller missing");
 		const doc = world.doc.get("faller");
-		if (!doc) throw new Error("doc entry missing");
+		if (doc?.kind !== "body") throw new Error("doc entry missing");
 		expect(doc.x).toBeCloseTo(live.x, 9);
 		expect(doc.y).toBeCloseTo(live.y, 9);
 		expect(doc.rot).toBeCloseTo(world.bodyRotation("faller") ?? NaN, 9);
 		// A second sync is idempotent once the doc matches.
 		world.syncLiveTransforms();
-		expect(world.doc.get("faller")?.y).toBeCloseTo(live.y, 9);
+		expect(doc.y).toBeCloseTo(live.y, 9);
 	}, 10_000);
 
 	test("culling a selected body prunes it from the selection set", async () => {

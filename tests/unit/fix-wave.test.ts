@@ -1,4 +1,5 @@
 import { expect, spyOn, test } from "bun:test";
+import { positionedOnly } from "../../src/lib/document";
 import { createToolEvents } from "../../src/lib/interaction";
 import { bodiesInRect, pickLabel, ToolSession } from "../../src/lib/tools";
 import * as geometry from "../../src/lib/triangulate";
@@ -37,7 +38,7 @@ async function fixture(paused = true) {
 		events,
 		(x, y) =>
 			pickLabel(world.labels(), x, y, 10) ?? [...world.bodies.keys()][0],
-		(rect) => bodiesInRect(world.doc.all(), rect),
+		(rect) => bodiesInRect(positionedOnly(world.doc.all()), rect),
 	);
 	return { world, stack, session, events };
 }
@@ -139,7 +140,7 @@ test("F9 mixed rubber-band and rotation includes labels and survives undo/redo",
 	world.setLabelText("l", "tag");
 	stack.commit();
 	expect(
-		bodiesInRect(world.doc.all(), {
+		bodiesInRect(positionedOnly(world.doc.all()), {
 			cx: 15,
 			cy: -30,
 			halfWidth: 10,

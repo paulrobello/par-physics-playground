@@ -12,6 +12,7 @@ import {
 	type FreehandDecision,
 	FreehandStrokeBuilder,
 } from "./freehand";
+import { jointPickRadius, type PlaceableJointKind } from "./joint";
 import { pointInPolygon, type Vec2 } from "./triangulate";
 
 export type ToolId =
@@ -21,17 +22,21 @@ export type ToolId =
 	| "polygon"
 	| "line"
 	| "freehand"
-	| "text";
+	| "text"
+	| "thruster"
+	| "joint";
 
 /** All tool ids, for DOM validation of toolbar buttons. */
 export const TOOL_IDS: readonly ToolId[] = [
 	"select",
 	"box",
+	"joint",
 	"circle",
 	"polygon",
 	"line",
 	"freehand",
 	"text",
+	"thruster",
 ];
 
 export function isToolId(value: string): value is ToolId {
@@ -40,8 +45,7 @@ export function isToolId(value: string): value is ToolId {
 
 /**
  * Keyboard shortcuts: V select, B box, C circle, G polygon, L line, F
- * freehand, T text. (P would be the natural polygon key but belongs to the sim
- * pause toggle, so polygon takes G — as in polyGon.)
+ * freehand, T text, H thruster, J joint.
  */
 export const TOOL_KEYS: Record<string, ToolId> = {
 	KeyV: "select",
@@ -51,6 +55,8 @@ export const TOOL_KEYS: Record<string, ToolId> = {
 	KeyL: "line",
 	KeyF: "freehand",
 	KeyT: "text",
+	KeyH: "thruster",
+	KeyJ: "joint",
 };
 
 /**
@@ -235,7 +241,9 @@ export type DrawPreview =
 			closable: boolean;
 	  }
 	| { kind: "stroke"; points: readonly Vec2[] }
-	| { kind: "text"; x: number; y: number; text: string };
+	| { kind: "text"; x: number; y: number; text: string }
+	/** Joint tool arming: first anchor to the cursor; `toBody` highlights a valid second endpoint. */
+	| { kind: "joint"; from: Vec2; to: Vec2; toBody: boolean };
 
 /** Beam centered on the segment midpoint, oriented along it, min length clamped. */
 export function beamFromSegment(
@@ -363,6 +371,43 @@ export function pickLabel(
 }
 
 /**
+ * Topmost joint whose glyph pick radius contains the world point, or
+ * undefined. Tested last-to-first like pickBody/pickLabel; callers resolve
+ * each joint's live world anchor (jointWorldAnchor) and list joints after
+ * bodies so a joint glyph wins over the body underneath it. `zoom` sizes the
+ * hit radius to the glyph the renderer actually draws at this zoom.
+ */
+export function pickJoint(
+	joints: readonly { id: string; wx: number; wy: number }[],
+	wx: number,
+	wy: number,
+	zoom = 1,
+): string | undefined {
+	for (let i = joints.length - 1; i >= 0; i--) {
+		const j = joints[i];
+		if (!j) continue;
+		const r = jointPickRadius(zoom);
+		const dx = wx - j.wx;
+		const dy = wy - j.wy;
+		if (dx * dx + dy * dy <= r * r) return j.id;
+	}
+	return undefined;
+}
+
+/**
+ * Thruster glyph picking (P4-T5): the same screen-constant radius as a joint
+ * glyph (what you see is what you click), topmost-last like joints.
+ */
+export function pickThruster(
+	thrusters: readonly { id: string; wx: number; wy: number }[],
+	wx: number,
+	wy: number,
+	zoom = 1,
+): string | undefined {
+	return pickJoint(thrusters, wx, wy, zoom);
+}
+
+/**
  * Unclamped rectangle from two corners — the rubber-band selection frame (a
  * near-zero click rectangle legitimately selects nothing, unlike draw sizing
  * which clamps to a minimum shape).
@@ -451,6 +496,62 @@ export interface ToolSessionEvents {
 	 * (undefined when a body could not be duplicated).
 	 */
 	onDuplicate(ids: readonly string[]): (string | undefined)[];
+	/**
+	 * The joint tool completed its two-click attach: body `bodyAId` to body
+	 * `bodyBId`, or to the world when null. `anchorX/Y` is the arming click
+	 * (the first point), `x, y` the placement click (the second). `jointKind`
+	 * selects the materialized joint type. Returns the new joint's id so the
+	 * session selects it (D19: a joint selects, deletes like any entity), or
+	 * undefined when the placement was refused (missing body, unmaterialized
+	 * kind). Optional so test doubles and headless harnesses that never place
+	 * joints can omit it.
+	 */
+	onPlaceJoint?(spec: {
+		readonly bodyAId: string;
+		readonly bodyBId: string | null;
+		readonly jointKind: PlaceableJointKind;
+		readonly anchorX: number;
+		readonly anchorY: number;
+		readonly x: number;
+		readonly y: number;
+	}): string | undefined;
+	/**
+	 * The thruster tool placed a mount: a single click on body `bodyId` at
+	 * the world point `x, y`. Returns the new thruster's id so the session
+	 * selects it (panel opens, glyph toggle live), or undefined when the
+	 * placement was refused (no body under the click).
+	 */
+	onPlaceThruster?(spec: {
+		readonly bodyId: string;
+		readonly x: number;
+		readonly y: number;
+	}): string | undefined;
+	/**
+	 * Glyph toggle affordance (P4-T3 motor, P4-T5 thruster): a plain
+	 * select-tool press landed on the picked entity `id` (no shift, no rotate
+	 * modifier). Return true when the press was CONSUMED as a glyph toggle —
+	 * the press must not then start a drag or rubber-band. The toggle itself
+	 * routes through the ordinary update boundary in the events layer;
+	 * selection follows the ordinary select path so the panel opens on the
+	 * toggled entity.
+	 */
+	onMotorGlyphClick?(id: string): boolean;
+	/**
+	 * P4-T4 rope: a rope stroke was released. `points` are the captured
+	 * (shift-snapped) stroke samples; `captureA`/`captureB` are the pick ids
+	 * under each endpoint — a live body captures that end by a pin joint,
+	 * anything else (empty space, label, …) captures it to the WORLD at the
+	 * endpoint point (D18 "bodies/world"). Returns null when the chain was
+	 * refused (the D17 bounds — the events layer surfaces the reason visibly).
+	 */
+	onSpawnRope?(spec: {
+		readonly points: readonly Vec2[];
+		readonly captureA?: string | undefined;
+		readonly captureB?: string | undefined;
+	}): {
+		readonly segments: readonly string[];
+		readonly joints: readonly string[];
+	} | null;
 }
 
 type Phase =
@@ -494,7 +595,27 @@ type Phase =
 			curY: number;
 			additive: boolean;
 	  }
-	| { readonly kind: "rotating"; startY: number };
+	| { readonly kind: "rotating"; startY: number }
+	| {
+			readonly kind: "joint-arming";
+			readonly bodyAId: string;
+			/** World point of the first click (bodyA's pivot). */
+			readonly anchorX: number;
+			readonly anchorY: number;
+			curX: number;
+			curY: number;
+	  }
+	| {
+			/**
+			 * Rope placement (P4-T4, D18): a freehand stroke drawn while the
+			 * joint tool's rope kind is active; the release converts it to a
+			 * segment chain. Shift angle-snaps each new sample to
+			 * horizontal/vertical/45° from the LAST captured point (line-run
+			 * pattern via {@link constrainSegment}).
+			 */
+			readonly kind: "rope-draw";
+			readonly stroke: FreehandStrokeBuilder;
+	  };
 
 /**
  * Tool state machine. Feed it world-space pointer events; it emits spawn,
@@ -510,6 +631,12 @@ export class ToolSession {
 	 * property, not a tool, so it composes with any draw tool.
 	 */
 	staticMode = false;
+	/**
+	 * The joint tool's active placement kind (P4-T2; motor joins in P4-T3):
+	 * the segmented picker in the tool rail sets it; placement derives params
+	 * from it via {@link makePlacedJoint}. Default pin (the T1 behavior).
+	 */
+	jointKind: PlaceableJointKind = "pin";
 	/** Body under the pointer (hover), updated by pointerMove when idle. */
 	hoverId: string | undefined;
 	/** Currently selected bodies, in no particular order. */
@@ -585,6 +712,17 @@ export class ToolSession {
 				y: this.phase.anchorY,
 				text: this.phase.text,
 			};
+		}
+		if (this.phase.kind === "joint-arming") {
+			return {
+				kind: "joint",
+				from: { x: this.phase.anchorX, y: this.phase.anchorY },
+				to: { x: this.phase.curX, y: this.phase.curY },
+				toBody: this.pick(this.phase.curX, this.phase.curY) !== undefined,
+			};
+		}
+		if (this.phase.kind === "rope-draw") {
+			return { kind: "stroke", points: this.phase.stroke.points };
 		}
 		return null;
 	}
@@ -734,6 +872,26 @@ export class ToolSession {
 			this.spawnLine(startX, startY, wx, wy, shift || mods.shift === true);
 			return;
 		}
+		if (this.phase.kind === "joint-arming") {
+			// Second click: a body becomes bodyB; empty space anchors to the
+			// world (pin-to-world). The joint is placed AT the second click.
+			// Clicking bodyA again aborts the arming (a self-joint is refused).
+			const { bodyAId, anchorX, anchorY } = this.phase;
+			this.phase = { kind: "idle" };
+			const hitId = this.pick(wx, wy);
+			if (hitId === bodyAId) return;
+			const jointId = this.events.onPlaceJoint?.({
+				bodyAId,
+				bodyBId: hitId ?? null,
+				jointKind: this.jointKind,
+				anchorX,
+				anchorY,
+				x: wx,
+				y: wy,
+			});
+			if (jointId) this.selectedIds = new Set([jointId]);
+			return;
+		}
 		if (this.phase.kind === "polygon-place") {
 			const first = this.phase.points[0] as Vec2;
 			const dx = wx - first.x;
@@ -755,6 +913,48 @@ export class ToolSession {
 		}
 		if (this.phase.kind !== "idle") return;
 		if (this.tool !== "select") this.events.onBeginAction?.();
+		if (this.tool === "joint") {
+			// Rope placement (P4-T4): a freehand stroke, not a two-click attach —
+			// the release converts the stroke into a segment chain (D18).
+			if (this.jointKind === "rope") {
+				const stroke = new FreehandStrokeBuilder();
+				stroke.add(wx, wy);
+				this.phase = { kind: "rope-draw", stroke };
+				return;
+			}
+			const hitId = this.pick(wx, wy);
+			if (!hitId) {
+				// No body under the first click: no gesture started, so drop the
+				// generic beginAction snapshot this tool's press already took.
+				this.events.onCancelAction?.();
+				return;
+			}
+			this.phase = {
+				kind: "joint-arming",
+				bodyAId: hitId,
+				anchorX: wx,
+				anchorY: wy,
+				curX: wx,
+				curY: wy,
+			};
+			return;
+		}
+		if (this.tool === "thruster") {
+			// Single click on a body mounts a thruster at the click point
+			// (empty space refuses — nothing to push against).
+			const hitId = this.pick(wx, wy);
+			if (!hitId) {
+				this.events.onCancelAction?.();
+				return;
+			}
+			const thrusterId = this.events.onPlaceThruster?.({
+				bodyId: hitId,
+				x: wx,
+				y: wy,
+			});
+			if (thrusterId) this.selectedIds = new Set([thrusterId]);
+			return;
+		}
 		if (this.tool === "line") {
 			this.phase = {
 				kind: "line-drawing",
@@ -825,6 +1025,13 @@ export class ToolSession {
 			return;
 		} else if (hit) {
 			if (!this.selectedIds.has(hit)) this.selectedIds = new Set([hit]);
+			// Motor/thruster glyph affordance (P4-T3/P4-T5): a consumed press
+			// toggled a glyph's on/off state; it takes no drag phase (joints
+			// and thrusters are not draggable).
+			if (this.events.onMotorGlyphClick?.(hit)) {
+				this.phase = { kind: "idle" };
+				return;
+			}
 		} else {
 			// Empty space: rubber-band (additive under shift), not deselect yet —
 			// a zero-size band (plain click) deselects on release.
@@ -868,6 +1075,23 @@ export class ToolSession {
 			this.phase = { ...this.phase, curX: wx, curY: wy };
 			return;
 		}
+		if (this.phase.kind === "joint-arming") {
+			this.phase = { ...this.phase, curX: wx, curY: wy };
+			return;
+		}
+		if (this.phase.kind === "rope-draw") {
+			// Shift angle-snaps the new sample to horizontal/vertical/45° from
+			// the LAST captured point (line-run pattern); plain moves append.
+			const last =
+				this.phase.stroke.points[this.phase.stroke.points.length - 1];
+			if (mods.shift && last) {
+				const snapped = constrainSegment(last.x, last.y, wx, wy);
+				this.phase.stroke.add(snapped.x, snapped.y);
+			} else {
+				this.phase.stroke.add(wx, wy);
+			}
+			return;
+		}
 		if (this.phase.kind === "rotating") {
 			this.events.onRotate(angleFromVerticalDrag(this.phase.startY, wy));
 			return;
@@ -880,6 +1104,24 @@ export class ToolSession {
 	}
 
 	pointerUp(): void {
+		if (this.phase.kind === "rope-draw") {
+			const points = this.phase.stroke.points;
+			this.phase = { kind: "idle" };
+			if (points.length < 2) {
+				// A click without a stroke: no chain to place — drop the gesture
+				// snapshot the press took.
+				this.events.onCancelAction?.();
+				return;
+			}
+			const first = points[0] as Vec2;
+			const last = points[points.length - 1] as Vec2;
+			this.events.onSpawnRope?.({
+				points,
+				captureA: this.pick(first.x, first.y),
+				captureB: this.pick(last.x, last.y),
+			});
+			return;
+		}
 		if (this.phase.kind === "freehand") {
 			const decision = decideFreehand(this.phase.stroke.points);
 			this.phase = { kind: "idle" };

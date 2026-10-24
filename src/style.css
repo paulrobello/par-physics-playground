@@ -257,6 +257,28 @@ input[type="range"]:hover::-moz-range-thumb {
 	background: var(--panel-border);
 }
 
+/* Joint-kind picker (P4-T2): a compact vertical group shown under the joint
+   tool button while the joint tool is active (hidden attribute toggles it).
+   Smaller buttons so four kinds fit the rail without crowding it. */
+.joint-kinds {
+	display: flex;
+	flex-direction: column;
+	gap: 3px;
+	padding: 3px;
+	border: 1px solid var(--panel-border);
+	border-radius: 8px;
+	background: var(--surface-raised);
+}
+
+.joint-kinds[hidden] {
+	display: none;
+}
+
+.joint-kinds .tool-btn {
+	width: 28px;
+	height: 28px;
+}
+
 .tool-btn.active,
 .tool-btn[aria-pressed="true"] {
 	color: var(--accent);
@@ -554,4 +576,67 @@ input[type="range"]:hover::-moz-range-thumb {
 		transition-duration: 0.01ms;
 		animation-duration: 0.01ms;
 	}
+}
+
+/* Joint panel section (P4-T1 skeleton): mirrors the material panel's field
+   typography; per-type controls land with T2-T5. */
+.joint-panel {
+	padding: 8px 0 0;
+	border-top: 1px solid var(--panel-border);
+	margin-top: 8px;
+}
+
+.joint-panel h2 {
+	margin: 0 0 6px;
+	font-size: 11px;
+	font-weight: 500;
+	letter-spacing: 0.06em;
+	color: var(--hud-text-secondary);
+}
+
+.joint-field {
+	margin: 0 0 4px;
+	font-size: 12px;
+	color: var(--hud-text);
+}
+
+.joint-btn {
+	width: 100%;
+	margin-top: 6px;
+	padding: 6px 10px;
+	background: transparent;
+	color: var(--hud-text-secondary);
+	border: 1px solid var(--panel-border);
+	border-radius: 6px;
+	cursor: pointer;
+}
+
+.joint-btn:hover {
+	background: var(--surface-raised, #232b36);
+	color: var(--hud-text);
+}
+
+/* Transient notice toast (P4-T4 D17 visible rejection; see src/lib/notice.ts). */
+#ppg-notice {
+	position: fixed;
+	left: 50%;
+	bottom: 96px;
+	transform: translateX(-50%) translateY(6px);
+	padding: 8px 14px;
+	background: rgba(20, 24, 30, 0.92);
+	color: var(--hud-text, #e6e9ee);
+	border: 1px solid var(--panel-border, rgba(152, 162, 179, 0.35));
+	border-radius: 8px;
+	font-size: 12px;
+	opacity: 0;
+	pointer-events: none;
+	transition:
+		opacity 0.25s ease,
+		transform 0.25s ease;
+	z-index: 30;
+}
+
+#ppg-notice.visible {
+	opacity: 1;
+	transform: translateX(-50%) translateY(0);
 }
