@@ -29,7 +29,7 @@ function restoreValidated(
 ): boolean {
 	const result = validateSceneFile(raw);
 	if (!result.ok) {
-		showNotice(`Import refused: ${result.error}`);
+		showNotice(`Import refused: ${result.error}`, "error");
 		return false;
 	}
 	try {
@@ -40,6 +40,7 @@ function restoreValidated(
 		console.warn("[par-physics] scene restore failed", err);
 		showNotice(
 			"Import refused: the scene contains an entity that cannot be built",
+			"error",
 		);
 		return false;
 	}
@@ -66,6 +67,9 @@ export function attachSceneUI(options: SceneUIOptions): void {
 	const importInput = topBar.querySelector<HTMLInputElement>(
 		'[data-scenes="import"]',
 	);
+	const importOpen = topBar.querySelector<HTMLButtonElement>(
+		'[data-scenes="import-open"]',
+	);
 	if (
 		!openButton ||
 		!panel ||
@@ -73,7 +77,8 @@ export function attachSceneUI(options: SceneUIOptions): void {
 		!saveName ||
 		!list ||
 		!exportButton ||
-		!importInput
+		!importInput ||
+		!importOpen
 	) {
 		throw new Error("scenes menu elements missing from the top bar");
 	}
@@ -83,6 +88,13 @@ export function attachSceneUI(options: SceneUIOptions): void {
 			.list()
 			.then((scenes) => {
 				list.textContent = "";
+				if (scenes.length === 0) {
+					const hint = document.createElement("li");
+					hint.className = "scenes-empty";
+					hint.textContent = "No saved scenes yet";
+					list.append(hint);
+					return;
+				}
 				for (const { name } of scenes) {
 					const li = document.createElement("li");
 					li.dataset.sceneRow = name;
@@ -134,7 +146,7 @@ export function attachSceneUI(options: SceneUIOptions): void {
 			.load(name)
 			.then((file) => {
 				if (!file) {
-					showNotice(`Scene "${name}" not found`);
+					showNotice(`Scene "${name}" not found`, "error");
 					return;
 				}
 				if (restoreValidated(world, undo, file)) {
@@ -144,7 +156,7 @@ export function attachSceneUI(options: SceneUIOptions): void {
 			})
 			.catch((err) => {
 				console.warn("[par-physics] scene load failed", err);
-				showNotice(`Scene "${name}" could not be read`);
+				showNotice(`Scene "${name}" could not be read`, "error");
 			});
 	};
 
@@ -152,7 +164,7 @@ export function attachSceneUI(options: SceneUIOptions): void {
 		e.preventDefault();
 		const name = saveName.value.trim();
 		if (!name) {
-			showNotice("Scene name is empty");
+			showNotice("Scene name is empty", "error");
 			return;
 		}
 		store
@@ -164,7 +176,7 @@ export function attachSceneUI(options: SceneUIOptions): void {
 			})
 			.catch((err) => {
 				console.warn("[par-physics] scene save failed", err);
-				showNotice(`Saving "${name}" failed`);
+				showNotice(`Saving "${name}" failed`, "error");
 			});
 	});
 
@@ -181,10 +193,13 @@ export function attachSceneUI(options: SceneUIOptions): void {
 			store
 				.delete(name)
 				.then((gone) => {
-					showNotice(gone ? `Deleted "${name}"` : `Scene "${name}" not found`);
+					showNotice(
+						gone ? `Deleted "${name}"` : `Scene "${name}" not found`,
+						gone ? "info" : "error",
+					);
 					refreshList();
 				})
-				.catch(() => showNotice(`Deleting "${name}" failed`));
+				.catch(() => showNotice(`Deleting "${name}" failed`, "error"));
 			return;
 		}
 		const ren = target.closest<HTMLButtonElement>("[data-scene-ren]");
@@ -200,10 +215,12 @@ export function attachSceneUI(options: SceneUIOptions): void {
 			input.dataset.sceneRenameInput = oldName;
 			const confirm = document.createElement("button");
 			confirm.type = "button";
+			confirm.className = "mat-btn scenes-mini-btn";
 			confirm.textContent = "OK";
 			confirm.dataset.sceneRenameOk = oldName;
 			const cancel = document.createElement("button");
 			cancel.type = "button";
+			cancel.className = "mat-btn scenes-mini-btn";
 			cancel.textContent = "Cancel";
 			cancel.dataset.sceneRenameCancel = "1";
 			li.textContent = "";
@@ -232,14 +249,20 @@ export function attachSceneUI(options: SceneUIOptions): void {
 				.then((renamed) => {
 					showNotice(
 						renamed ? `Renamed to "${newName}"` : `"${newName}" is taken`,
+						renamed ? "info" : "error",
 					);
 					refreshList();
 				})
-				.catch(() => showNotice(`Renaming "${oldName}" failed`));
+				.catch(() => showNotice(`Renaming "${oldName}" failed`, "error"));
 			return;
 		}
 		if (target.closest("[data-scene-rename-cancel]")) refreshList();
 	});
+
+	// A real button (keyboard-focusable, focus ring) opens the hidden file
+	// input — the label-for-hidden-input pattern left Import unreachable by
+	// keyboard (P5-T4 review fix 5).
+	importOpen.addEventListener("click", () => importInput.click());
 
 	exportButton.addEventListener("click", () => {
 		const file = buildSceneFile(world.doc);
@@ -266,7 +289,7 @@ export function attachSceneUI(options: SceneUIOptions): void {
 				try {
 					parsed = JSON.parse(text);
 				} catch {
-					showNotice("Import refused: the file is not valid JSON");
+					showNotice("Import refused: the file is not valid JSON", "error");
 					return;
 				}
 				if (restoreValidated(world, undo, parsed)) {
@@ -274,6 +297,6 @@ export function attachSceneUI(options: SceneUIOptions): void {
 					setMenuOpen(false);
 				}
 			})
-			.catch(() => showNotice(`Reading ${file.name} failed`));
+			.catch(() => showNotice(`Reading ${file.name} failed`, "error"));
 	});
 }

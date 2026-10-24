@@ -459,11 +459,14 @@ export function createRenderer(
 		if (!scene) return;
 		const selected = new Set(scene.selectedIds());
 		const r = jointGlyphRadius(zoom);
-		ctx.shadowColor = HOVER_GLOW;
-		ctx.shadowBlur = HOVER_GLOW_BLUR_PX;
+		// PRD R2: glow is a selection affordance, not an every-glyph state —
+		// the blur raster is per-draw, and rope-heavy scenes draw hundreds of
+		// links. Shadow state toggles per item (selected only).
 		ctx.strokeStyle = ACCENT_COLOR;
 		scene.forEachJoint((id, jointType, wx, wy, motorOn, wx2, wy2) => {
 			const isSel = selected.has(id);
+			ctx.shadowColor = isSel ? HOVER_GLOW : "transparent";
+			ctx.shadowBlur = isSel ? HOVER_GLOW_BLUR_PX : 0;
 			if (jointType === "rope") {
 				// Rope link (P4-T4): no ring, no inner glyph — the chain of
 				// stroked link lines IS the rope's continuous curve through the
@@ -553,10 +556,12 @@ export function createRenderer(
 		if (!scene) return;
 		const selected = new Set(scene.selectedIds());
 		const r = jointGlyphRadius(zoom);
-		ctx.shadowColor = HOVER_GLOW;
-		ctx.shadowBlur = HOVER_GLOW_BLUR_PX;
 		ctx.lineWidth = 1.5 / zoom;
 		scene.forEachThruster((id, wx, wy, angle, on) => {
+			const isSel = selected.has(id);
+			// Same PRD R2 rule as joints: glow on selection only.
+			ctx.shadowColor = isSel ? HOVER_GLOW : "transparent";
+			ctx.shadowBlur = isSel ? HOVER_GLOW_BLUR_PX : 0;
 			const color = on ? ACCENT_COLOR : JOINT_OFF_COLOR;
 			ctx.strokeStyle = color;
 			ctx.fillStyle = color;

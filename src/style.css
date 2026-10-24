@@ -611,9 +611,19 @@ input[type="range"]:hover::-moz-range-thumb {
 	cursor: pointer;
 }
 
+.joint-btn {
+	transition:
+		color var(--dur) var(--ease),
+		background-color var(--dur) var(--ease),
+		border-color var(--dur) var(--ease),
+		box-shadow var(--dur) var(--ease),
+		transform var(--dur) var(--ease);
+}
+
 .joint-btn:hover {
 	background: var(--surface-raised, #232b36);
 	color: var(--hud-text);
+	transform: translateY(-1px);
 }
 
 /* Transient notice toast (P4-T4 D17 visible rejection; see src/lib/notice.ts). */
@@ -634,6 +644,11 @@ input[type="range"]:hover::-moz-range-thumb {
 		opacity 0.25s ease,
 		transform 0.25s ease;
 	z-index: 30;
+}
+
+#ppg-notice.error {
+	color: var(--danger-text, #ff6b60);
+	border-color: var(--danger, #f44336);
 }
 
 #ppg-notice.visible {
@@ -674,7 +689,9 @@ input[type="range"]:hover::-moz-range-thumb {
 	font: inherit;
 	font-size: 12px;
 	color: var(--hud-text);
-	background: var(--surface-raised);
+	/* Stage Void inset (Inputs spec) — same field treatment as the material
+	 * editor, not the raised-surface treatment of buttons. */
+	background: var(--canvas-bg);
 	border: 1px solid var(--panel-border);
 	border-radius: 6px;
 }
@@ -705,8 +722,34 @@ input[type="range"]:hover::-moz-range-thumb {
 	margin: 8px 0;
 }
 
-.scenes-panel [data-scenes="import-label"] {
-	display: block;
-	text-align: center;
-	cursor: pointer;
+/* Import/Export share the menu's mat-btn row styling. */
+
+/* Empty scene list hint (the menu's one empty state). */
+.scenes-empty {
+	padding: 6px 2px;
+	font-size: 12px;
+	/* Reading text never rides the tertiary (disabled-only) ramp. */
+	color: var(--hud-text-secondary);
+}
+
+/* Compact ghost buttons for the inline rename row (same mat-btn vocabulary
+ * at the menu's smaller scale — no raw UA chrome inside the dark panel). */
+.scenes-mini-btn {
+	padding: 4px 8px;
+	font-size: 11px;
+}
+
+/* Scenes list scrollbar: same instrument-palette theme as the context panel. */
+.scenes-panel ul::-webkit-scrollbar {
+	width: 10px;
+}
+
+.scenes-panel ul::-webkit-scrollbar-thumb {
+	background: var(--panel-border);
+	border-radius: 5px;
+	border: 2px solid var(--panel-bg);
+}
+
+.scenes-panel ul::-webkit-scrollbar-thumb:hover {
+	background: var(--border-strong);
 }

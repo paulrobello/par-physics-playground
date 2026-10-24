@@ -8,7 +8,13 @@
 let hideTimer: ReturnType<typeof setTimeout> | null = null;
 const NOTICE_HIDE_MS = 3200;
 
-export function showNotice(message: string): void {
+/**
+ * Notice kind: `error` refusals render in the danger text color (the
+ * DESIGN.md danger reservation) so a refusal never reads as a success.
+ */
+export type NoticeKind = "info" | "error";
+
+export function showNotice(message: string, kind: NoticeKind = "info"): void {
 	let el = document.getElementById("ppg-notice");
 	if (!el) {
 		el = document.createElement("div");
@@ -17,6 +23,7 @@ export function showNotice(message: string): void {
 		document.body.append(el);
 	}
 	el.textContent = message;
+	el.classList.toggle("error", kind === "error");
 	el.classList.add("visible");
 	if (hideTimer) clearTimeout(hideTimer);
 	const node = el;
