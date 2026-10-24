@@ -83,3 +83,22 @@ measured on realistic box documents (bun bench, 100 iterations each):
 
 Commits happen per user action, not per frame — 0.16 ms against an 8.3 ms
 frame is noise. No optimization warranted.
+
+## Cross-machine determinism (2026-10-24, final-review ticket)
+
+Same scripted settle (drop a 25-half box at (0,−100), advanceTime 10 s, 600
+ticks) on two machines — MacDaddy (Apple M4 Max, this workstation) and
+MiniMac (Apple M4, fresh clone, headless Chromium):
+
+| | x | y |
+|---|---|---|
+| M4 Max | −0.000797361193690449 | −24.99990081787109**7** |
+| M4 | −0.000797361193690449 | −24.99990081787109**4** |
+
+x bit-identical; y differs by exactly 1 ULP (3×10⁻¹⁵ absolute, 1.2×10⁻¹⁶
+relative on the body's 25-unit half-height) — WASM float variance across
+different silicon, far inside the e2e's 1e-9 fresh-session tolerance.
+Within-machine runs are bit-exact across fresh sessions (e2e
+sim-determinism.pw.ts). Determinism holds across sessions and machines at
+physical relevance; last-bit float divergence across CPU models is
+documented, not claimed away.
