@@ -640,3 +640,73 @@ input[type="range"]:hover::-moz-range-thumb {
 	opacity: 1;
 	transform: translateX(-50%) translateY(0);
 }
+
+/* Scenes menu (P5-T1/T2): dropdown panel anchored to the top-bar Scenes
+ * button, same instrument palette as the context panel. */
+.scenes-menu {
+	position: relative;
+	display: flex;
+}
+
+.scenes-panel {
+	position: absolute;
+	top: calc(100% + 6px);
+	left: 0;
+	min-width: 240px;
+	padding: 10px;
+	background: var(--panel-bg);
+	border: 1px solid var(--panel-border);
+	border-radius: 8px;
+	box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+	z-index: 40;
+}
+
+.scenes-panel form {
+	display: flex;
+	gap: 6px;
+	margin-bottom: 8px;
+}
+
+.scenes-panel input[type="text"] {
+	flex: 1;
+	min-width: 0;
+	padding: 6px 8px;
+	font: inherit;
+	font-size: 12px;
+	color: var(--hud-text);
+	background: var(--surface-raised);
+	border: 1px solid var(--panel-border);
+	border-radius: 6px;
+}
+
+.scenes-panel ul {
+	list-style: none;
+	margin: 0;
+	padding: 0;
+	max-height: 220px;
+	overflow-y: auto;
+}
+
+.scenes-panel li {
+	display: flex;
+	gap: 6px;
+	align-items: center;
+	padding: 2px 0;
+}
+
+.scenes-panel li > button:first-child {
+	flex: 1;
+	text-align: left;
+}
+
+.scenes-panel hr {
+	border: none;
+	border-top: 1px solid var(--panel-border);
+	margin: 8px 0;
+}
+
+.scenes-panel [data-scenes="import-label"] {
+	display: block;
+	text-align: center;
+	cursor: pointer;
+}

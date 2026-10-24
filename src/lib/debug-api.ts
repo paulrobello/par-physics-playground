@@ -5,7 +5,7 @@
 import type { Camera, CameraState } from "./camera";
 import type { SimClock } from "./clock";
 import { buildDemoScene } from "./demo-scene";
-import type { BodyShape } from "./document";
+import type { BodyShape, DocEntity } from "./document";
 import type { RopeChainSpawned } from "./interaction";
 import { placeRopeChain } from "./interaction";
 import type { JointEntity, JointParams } from "./joint";
@@ -191,6 +191,14 @@ export interface DebugApi {
 		| undefined;
 	/** Current tick count (advanceTime determinism check). */
 	tick(): number;
+	/** The whole document as plain entities (scene round-trip compares). */
+	documentAll(): DocEntity[];
+	/** Registered materials, predefined and custom. */
+	customMaterials(): Material[];
+	/** Register a custom material (scene fixtures); false on id collision. */
+	addCustomMaterial(material: Material): boolean;
+	/** Point a body at a different material; false when refused. */
+	setBodyMaterial(id: DocumentId, materialId: string): boolean;
 	/** World coordinates under a screen position (CSS pixels, canvas-relative). */
 	screenToWorld(sx: number, sy: number): { x: number; y: number };
 	/** Current camera pan/zoom state. */
@@ -417,6 +425,18 @@ export function installDebugApi(
 		},
 		tick() {
 			return clock.tick;
+		},
+		documentAll() {
+			return world.doc.all().map((e) => structuredClone(e));
+		},
+		customMaterials() {
+			return world.doc.allMaterials().map((m) => ({ ...m }));
+		},
+		addCustomMaterial(material) {
+			return world.doc.addMaterial({ ...material });
+		},
+		setBodyMaterial(id, materialId) {
+			return world.setBodyMaterial(id, materialId);
 		},
 		screenToWorld(sx, sy) {
 			const p = camera.screenToWorld(sx, sy);

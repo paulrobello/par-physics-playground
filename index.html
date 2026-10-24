@@ -12,6 +12,20 @@
 				<h1>Par Physics Playground</h1>
 				<button type="button" class="mat-btn sim-preset-btn" data-sim="demo" title="Load the built-in demo scene (a Rube Goldberg starter machine)">Demo scene</button>
 				<button type="button" class="mat-btn sim-preset-btn" data-sim="new-world" title="Clear the world to an empty scene">New empty world</button>
+				<div class="scenes-menu">
+					<button type="button" class="mat-btn sim-preset-btn" data-scenes="open" aria-haspopup="true" aria-expanded="false" title="Saved scenes, JSON export and import">Scenes</button>
+					<div class="scenes-panel" data-scenes-menu hidden>
+						<form data-scenes="save-form">
+							<input data-scenes="save-name" type="text" placeholder="Scene name" maxlength="60" aria-label="Scene name" autocomplete="off" />
+							<button type="submit" class="mat-btn" data-scenes="save" title="Save the current world under this name">Save</button>
+						</form>
+						<ul data-scenes="list" aria-label="Saved scenes"></ul>
+						<hr />
+						<button type="button" class="mat-btn" data-scenes="export" title="Download the current world as a JSON file">Export JSON</button>
+						<label class="mat-btn" data-scenes="import-label" for="scene-import" title="Load a scene from a JSON file">Import JSON</label>
+						<input data-scenes="import" id="scene-import" type="file" accept="application/json,.json" hidden />
+					</div>
+				</div>
 				<div class="sim-controls" role="toolbar" aria-label="Simulation controls">
 					<button type="button" class="tool-btn" data-sim="pause" aria-label="Pause simulation (P)" aria-pressed="false" title="Pause (P)">
 						<svg viewBox="0 0 16 16" aria-hidden="true"><rect x="4" y="3" width="3" height="10" rx="1" fill="currentColor"/><rect x="9" y="3" width="3" height="10" rx="1" fill="currentColor"/></svg>

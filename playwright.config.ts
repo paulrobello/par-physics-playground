@@ -8,6 +8,8 @@ export default defineConfig({
 	use: {
 		baseURL: "http://127.0.0.1:8114",
 		channel: "chromium",
+		// Scene JSON export drives a real browser download (e2e/scenes.pw.ts).
+		acceptDownloads: true,
 		launchOptions: {
 			args:
 				process.env.PW_GPU === "swiftshader"

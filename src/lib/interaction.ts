@@ -31,6 +31,7 @@ import {
 	ROPE_MAX_TOTAL_SEGMENTS,
 	ROPE_SEGMENT_RADIUS,
 	ROPE_SEGMENT_SPACING,
+	syncRopeSegmentCounter,
 } from "./rope";
 import { THRUSTER_DEFAULT_STRENGTH, type ThrusterEntity } from "./thruster";
 import {
@@ -75,6 +76,37 @@ export function freshThrusterId(): DocumentId {
 	const id = `thruster-${nextThrusterId}`;
 	nextThrusterId += 1;
 	return id;
+}
+
+/**
+ * Advance every id minter past the highest N in `entities` (P5 review C1):
+ * a restored scene carries ids this page's counters never issued, and a
+ * later mint colliding with a restored id silently REPLACES that body (and
+ * cascades its joints/thrusters away). Labels share the body counter; rope
+ * segments carry their own (the rope-seg-N prefix).
+ */
+export function syncEntityIdCounters(
+	entities: readonly { readonly id: DocumentId }[],
+): void {
+	let maxBody = 0;
+	let maxJoint = 0;
+	let maxThruster = 0;
+	for (const { id } of entities) {
+		maxBody = Math.max(maxBody, trailingNumber(id, "body-"));
+		maxJoint = Math.max(maxJoint, trailingNumber(id, "joint-"));
+		maxThruster = Math.max(maxThruster, trailingNumber(id, "thruster-"));
+	}
+	if (maxBody >= nextBodyId) nextBodyId = maxBody + 1;
+	if (maxJoint >= nextJointId) nextJointId = maxJoint + 1;
+	if (maxThruster >= nextThrusterId) nextThrusterId = maxThruster + 1;
+	syncRopeSegmentCounter(entities);
+}
+
+/** "body-42" → 42 for the given prefix; 0 when it does not match. */
+function trailingNumber(id: string, prefix: string): number {
+	if (!id.startsWith(prefix)) return 0;
+	const n = Number.parseInt(id.slice(prefix.length), 10);
+	return Number.isFinite(n) && n > 0 ? n : 0;
 }
 
 /** Rope chain spawn spec (P4-T4): see {@link placeRopeChain}. */

@@ -19,6 +19,13 @@ import { attachJointPanel } from "./lib/joint-panel";
 import { MATERIAL_DEFAULT_ID } from "./lib/material";
 import { attachMaterialPanel } from "./lib/material-panel";
 import { createMaterialStore } from "./lib/material-store";
+import {
+	applySceneFile,
+	buildSceneFile,
+	validateSceneFile,
+} from "./lib/scene-file";
+import { SceneStore } from "./lib/scene-store";
+import { attachSceneUI } from "./lib/scene-ui";
 import { attachSimControls, TimeScale } from "./lib/sim-controls";
 import {
 	bodiesInRect,
@@ -263,9 +270,27 @@ void (async () => {
 	// always boot with an empty world.
 	const forceDemo =
 		new URLSearchParams(window.location.search).get("demo") === "1";
+	// Scene store (P5-T1): opened before the boot decision so a returning
+	// session restores its autosaved working scene. Fresh debug contexts
+	// carry no autosave, so deterministic test pages still boot empty.
+	const sceneStore = new SceneStore();
+	try {
+		await sceneStore.open();
+	} catch (err) {
+		console.warn("[par-physics] scene store unavailable", err);
+	}
 	if (forceDemo || (!debugEnabled && shouldLoadDemoScene(localStorage))) {
 		w.restoreSnapshot(buildDemoScene());
 		markDemoSceneSeen(localStorage);
+	} else {
+		const autosave = await sceneStore.loadAutosave().catch(() => null);
+		if (autosave && validateSceneFile(autosave).ok) {
+			try {
+				applySceneFile(w, autosave);
+			} catch (err) {
+				console.warn("[par-physics] autosave restore failed", err);
+			}
+		}
 	}
 	// Undo/redo over the document: serialize always folds the LIVE sim state
 	// into the document first (Ruling 14) so undo restores what the user saw;
@@ -343,6 +368,23 @@ void (async () => {
 		throw new Error("scene action buttons missing from the top bar");
 	demoButton.addEventListener("click", loadDemo);
 	newWorldButton.addEventListener("click", clearWorld);
+	// Scenes menu + autosave (P5-T1/T2): every recorded action (the undo
+	// boundary) rewrites the autosave after a debounce; the menu owns named
+	// saves and JSON I/O over the same scene-file format. onChange is a
+	// single slot that attachToolControls already claimed for the undo
+	// toolbar buttons — chain, don't clobber (review I1).
+	attachSceneUI({ topBar, world: w, undo: undoStack, store: sceneStore });
+	const previousOnChange = undoStack.onChange;
+	let autosaveTimer: ReturnType<typeof setTimeout> | undefined;
+	undoStack.onChange = () => {
+		previousOnChange?.();
+		clearTimeout(autosaveTimer);
+		autosaveTimer = setTimeout(() => {
+			sceneStore
+				.autosave(buildSceneFile(w.doc))
+				.catch((err) => console.warn("[par-physics] autosave failed", err));
+		}, 500);
+	};
 	attachSimControls({
 		topBar,
 		clock: simClock,

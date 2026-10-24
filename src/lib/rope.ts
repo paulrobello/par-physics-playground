@@ -49,6 +49,24 @@ export function freshRopeSegmentId(): DocumentId {
 	return id;
 }
 
+/**
+ * Advance the rope-segment counter past the highest N in `entities` (P5
+ * review C1): restored/imported scenes carry rope-seg-N ids this page never
+ * issued, and a fresh mint colliding with one replaces that bead (and its
+ * chain bookkeeping). Called by syncEntityIdCounters on every restore.
+ */
+export function syncRopeSegmentCounter(
+	entities: readonly { readonly id: string }[],
+): void {
+	let max = 0;
+	for (const { id } of entities) {
+		if (!id.startsWith(ROPE_SEGMENT_ID_PREFIX)) continue;
+		const n = Number.parseInt(id.slice(ROPE_SEGMENT_ID_PREFIX.length), 10);
+		if (Number.isFinite(n) && n > max) max = n;
+	}
+	if (max >= nextRopeSegmentId) nextRopeSegmentId = max + 1;
+}
+
 /** True when `id` is a rope segment body id (see freshRopeSegmentId). */
 export function isRopeSegmentId(id: string): boolean {
 	return id.startsWith(ROPE_SEGMENT_ID_PREFIX);
