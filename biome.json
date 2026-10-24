@@ -3,5 +3,11 @@
 	"vcs": { "enabled": true, "clientKind": "git", "useIgnoreFile": true },
 	"files": { "includes": ["**", "!**/dist", "!**/*.md"] },
 	"formatter": { "indentStyle": "tab" },
-	"javascript": { "formatter": { "quoteStyle": "double" } }
+	"javascript": { "formatter": { "quoteStyle": "double" } },
+	"overrides": [
+		{
+			"includes": ["index.html"],
+			"linter": { "rules": { "a11y": { "noLabelWithoutControl": "off" } } }
+		}
+	]
 }

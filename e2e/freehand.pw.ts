@@ -52,9 +52,9 @@ test("freehand strokes snap to clean primitives and chains", async ({
 	};
 
 	await page.keyboard.press("f");
-	expect(
-		await page.locator('[data-tool="freehand"]').getAttribute("aria-pressed"),
-	).toBe("true");
+	expect(await page.locator('[data-tool="freehand"] input').isChecked()).toBe(
+		true,
+	);
 
 	// Circle: 24 samples on a ring of radius 30 at (150, -150).
 	const circlePts: { x: number; y: number }[] = [];

@@ -42,9 +42,9 @@ test("polygon and beam tools create bodies that settle and collide", async ({
 
 	// Polygon tool: triangle with a flat bottom (world vertices below).
 	await page.keyboard.press("g");
-	expect(
-		await page.locator('[data-tool="polygon"]').getAttribute("aria-pressed"),
-	).toBe("true");
+	expect(await page.locator('[data-tool="polygon"] input').isChecked()).toBe(
+		true,
+	);
 	await clickWorld(100, -80);
 	await clickWorld(160, -80);
 	await clickWorld(130, -140);
@@ -61,9 +61,7 @@ test("polygon and beam tools create bodies that settle and collide", async ({
 
 	// Line tool: horizontal beam by drag.
 	await page.keyboard.press("l");
-	expect(
-		await page.locator('[data-tool="line"]').getAttribute("aria-pressed"),
-	).toBe("true");
+	expect(await page.locator('[data-tool="line"] input').isChecked()).toBe(true);
 	const s1 = await pagePos(700, -300);
 	const s2 = await pagePos(900, -300);
 	await page.mouse.move(s1.x, s1.y);

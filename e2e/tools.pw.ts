@@ -33,16 +33,14 @@ test("draw tools place bodies that settle; select-drag moves and releases", asyn
 	};
 
 	// Toolbar: select is active by default; B/C shortcuts activate the draw tools.
-	expect(
-		await page.locator('[data-tool="select"]').getAttribute("aria-pressed"),
-	).toBe("true");
+	expect(await page.locator('[data-tool="select"] input').isChecked()).toBe(
+		true,
+	);
 	await page.keyboard.press("b");
-	expect(
-		await page.locator('[data-tool="box"]').getAttribute("aria-pressed"),
-	).toBe("true");
-	expect(
-		await page.locator('[data-tool="select"]').getAttribute("aria-pressed"),
-	).toBe("false");
+	expect(await page.locator('[data-tool="box"] input').isChecked()).toBe(true);
+	expect(await page.locator('[data-tool="select"] input').isChecked()).toBe(
+		false,
+	);
 
 	// Draw a box (80x80, center ~ (100, -260) in world coords), then commit.
 	const b1 = await pagePos(60, -300);

@@ -764,16 +764,21 @@ export function attachToolControls(deps: ToolControlsDeps): () => void {
 	const { toolbar, canvas, camera, session, undo } = deps;
 
 	const toolButtons = Array.from(
-		toolbar.querySelectorAll<HTMLButtonElement>("[data-tool]"),
+		toolbar.querySelectorAll<HTMLLabelElement>("[data-tool]"),
 	);
-	for (const button of toolButtons) {
-		button.addEventListener("click", () => {
-			const tool = button.dataset.tool ?? "";
-			if (isToolId(tool)) {
-				setToolAndSync(tool);
-			}
-		});
-	}
+	// The tool rail is a native radio group (P3-T4 a11y): label clicks and
+	// arrow-key navigation both land as a change event on the input — one
+	// listener covers mouse and keyboard.
+	toolbar.addEventListener("change", (event) => {
+		const input = event.target;
+		if (!(input instanceof HTMLInputElement) || !input.checked) return;
+		if (input.name === "tool" && isToolId(input.value)) {
+			setToolAndSync(input.value);
+		} else if (input.name === "joint-kind") {
+			if (isPlaceableJointKind(input.value)) session.jointKind = input.value;
+			syncToolbar();
+		}
+	});
 
 	// Edit actions (not tools): delete and duplicate the selection.
 	const actionHandlers: Record<string, () => void> = {
@@ -827,18 +832,11 @@ export function attachToolControls(deps: ToolControlsDeps): () => void {
 
 	// Joint-kind picker (P4-T2): segmented buttons in the tool rail, visible
 	// only while the joint tool is active. Clicking sets the session's
-	// placement kind; syncToolbar mirrors it into pressed states.
+	// placement kind; syncToolbar mirrors it into checked radios.
 	const kindRow = toolbar.querySelector<HTMLElement>("[data-joint-kinds]");
 	const jointKindButtons = Array.from(
-		toolbar.querySelectorAll<HTMLButtonElement>("[data-joint-kind]"),
+		toolbar.querySelectorAll<HTMLLabelElement>("[data-joint-kind]"),
 	);
-	for (const button of jointKindButtons) {
-		button.addEventListener("click", () => {
-			const kind = button.dataset.jointKind ?? "";
-			if (isPlaceableJointKind(kind)) session.jointKind = kind;
-			syncToolbar();
-		});
-	}
 
 	// Undo/redo buttons: disabled when the respective stack is empty.
 	const undoButtons = {
@@ -860,18 +858,22 @@ export function attachToolControls(deps: ToolControlsDeps): () => void {
 	}
 
 	function syncToolbar(): void {
-		for (const button of toolButtons) {
-			const active = button.dataset.tool === session.tool;
-			button.classList.toggle("active", active);
-			button.setAttribute("aria-pressed", active ? "true" : "false");
+		// Radio-group semantics: the tool choice is 1-of-N; the label's
+		// hidden input carries checked state (markup + change wiring above).
+		for (const label of toolButtons) {
+			const active = label.dataset.tool === session.tool;
+			label.classList.toggle("active", active);
+			const input = label.querySelector("input");
+			if (input) input.checked = active;
 		}
 		// Joint-kind picker row: visible only while the joint tool is active;
 		// its buttons mirror the session's placement kind.
 		if (kindRow) kindRow.hidden = session.tool !== "joint";
-		for (const button of jointKindButtons) {
-			const active = button.dataset.jointKind === session.jointKind;
-			button.classList.toggle("active", active);
-			button.setAttribute("aria-pressed", active ? "true" : "false");
+		for (const label of jointKindButtons) {
+			const active = label.dataset.jointKind === session.jointKind;
+			label.classList.toggle("active", active);
+			const input = label.querySelector("input");
+			if (input) input.checked = active;
 		}
 	}
 

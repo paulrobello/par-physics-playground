@@ -48,6 +48,11 @@ describe("classifyEditKey", () => {
 		expect(classifyEditKey(key({ code: "Backspace", key: "Backspace" }))).toBe(
 			"backspace",
 		);
+		// Delete edits text like Backspace during an inline label edit (it
+		// was a silent no-op — the UX card's "delete-while-editing").
+		expect(classifyEditKey(key({ code: "Delete", key: "Delete" }))).toBe(
+			"backspace",
+		);
 		expect(classifyEditKey(key({ code: "KeyA", key: "a" }))).toBe("insert");
 		// Non-printables without modifiers are swallowed too.
 		expect(classifyEditKey(key({ code: "ArrowLeft", key: "ArrowLeft" }))).toBe(

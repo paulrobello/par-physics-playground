@@ -753,3 +753,17 @@ input[type="range"]:hover::-moz-range-thumb {
 .scenes-panel ul::-webkit-scrollbar-thumb:hover {
 	background: var(--border-strong);
 }
+
+/* Tool rail radio inputs (P3-T4 a11y): visually hidden, natively
+ * keyboard-operable; the label is the visible button. Focus rides the
+ * label via :has(). */
+.tool-btn input[type="radio"] {
+	position: absolute;
+	opacity: 0;
+	pointer-events: none;
+	margin: 0;
+}
+
+.tool-btn:has(input[type="radio"]:focus-visible) {
+	box-shadow: var(--glow-accent);
+}

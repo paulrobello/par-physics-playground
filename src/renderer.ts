@@ -110,6 +110,8 @@ const HOVER_GLOW_BLUR_PX = 14;
 const HOVER_LIFT_PX = 1.5;
 /** Selection outline width, CSS px. */
 const SELECTION_WIDTH_PX = 2;
+/** Circle selection rings sit this far outside the shape's edge (CSS px). */
+const SELECTION_PAD_PX = 2;
 /** Draw-preview fill alpha and stroke width (CSS px). */
 const PREVIEW_FILL = "rgba(74, 163, 255, 0.12)";
 const PREVIEW_WIDTH_PX = 1.5;
@@ -685,7 +687,13 @@ export function createRenderer(
 			ctx.translate(x, y);
 			ctx.rotate(rot);
 			ctx.beginPath();
-			traceShapePath(ctx, shape);
+			if (shape.kind === "circle") {
+				// A circle's edge stroke half-covers its own fill; pad the
+				// selection ring outside the shape like the box outline reads.
+				ctx.arc(0, 0, shape.radius + SELECTION_PAD_PX / zoom, 0, Math.PI * 2);
+			} else {
+				traceShapePath(ctx, shape);
+			}
 			ctx.stroke();
 			ctx.restore();
 		});

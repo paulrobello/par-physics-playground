@@ -125,7 +125,9 @@ export function classifyEditKey(event: {
 }): EditKeyAction {
 	if (event.ctrlKey || event.metaKey || event.altKey) return "ignore";
 	if (event.code === "Enter" || event.code === "Escape") return "commit";
-	if (event.code === "Backspace") return "backspace";
+	// Delete edits the text like Backspace during an inline label edit (a
+	// bare Delete was a silent no-op — the UX card's delete-while-editing).
+	if (event.code === "Backspace" || event.code === "Delete") return "backspace";
 	if (event.key.length === 1) return "insert";
 	return "ignore";
 }

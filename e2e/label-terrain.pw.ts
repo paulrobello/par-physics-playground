@@ -100,9 +100,7 @@ test("static ramp deflects a dropped box; label is world-anchored across zoom", 
 
 	// --- Label: place, type, commit -----------------------------------------
 	await page.keyboard.press("t");
-	expect(
-		await page.locator('[data-tool="text"]').getAttribute("aria-pressed"),
-	).toBe("true");
+	expect(await page.locator('[data-tool="text"] input').isChecked()).toBe(true);
 	const labelPos = await pagePos(150, -120);
 	await page.mouse.click(labelPos.x, labelPos.y);
 	await page.keyboard.type("Ramp A");

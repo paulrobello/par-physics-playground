@@ -61,56 +61,56 @@
 				</div>
 			</header>
 			<nav id="tool-rail" aria-label="Tools">
-				<button type="button" class="tool-btn" data-tool="select" aria-label="Select tool (V)" aria-pressed="true" title="Select (V)">
+				<label class="tool-btn" for="ppg-tool-select" data-tool="select" title="Select (V)"><input id="ppg-tool-select" type="radio" name="tool" value="select" checked>
 					<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 2l9 6-4 1-2 4z" fill="currentColor"/></svg>
-				</button>
-				<button type="button" class="tool-btn" data-tool="box" aria-label="Box tool (B)" aria-pressed="false" title="Box (B)">
+				</label>
+				<label class="tool-btn" for="ppg-tool-box" data-tool="box" title="Box (B)"><input id="ppg-tool-box" type="radio" name="tool" value="box">
 					<svg viewBox="0 0 16 16" aria-hidden="true"><rect x="3" y="3" width="10" height="10" rx="1" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>
-				</button>
-				<button type="button" class="tool-btn" data-tool="joint" aria-label="Joint tool (J)" aria-pressed="false" title="Joint (J) — click a body, then a second body (or empty space to anchor to world); pick the kind below">
+				</label>
+				<label class="tool-btn" for="ppg-tool-joint" data-tool="joint" title="Joint (J)"><input id="ppg-tool-joint" type="radio" name="tool" value="joint">
 					<svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="4" fill="none" stroke="currentColor" stroke-width="1.5"/><circle cx="8" cy="8" r="1.5" fill="currentColor"/></svg>
-				</button>
+				</label>
 				<span class="joint-kinds" data-joint-kinds hidden>
-					<button type="button" class="tool-btn" data-joint-kind="pin" aria-pressed="true" title="Pin joint — free rotation about the shared pivot">
+					<label class="tool-btn" for="ppg-joint-kind-pin" data-joint-kind="pin" title="Pin joint — free rotation about the shared pivot"><input id="ppg-joint-kind-pin" type="radio" name="joint-kind" value="pin" checked>
 						<svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="5" fill="none" stroke="currentColor" stroke-width="1.5"/><circle cx="8" cy="8" r="1.5" fill="currentColor"/></svg>
-					</button>
-					<button type="button" class="tool-btn" data-joint-kind="weld" aria-pressed="false" title="Weld joint — the pair moves as one rigid unit">
+					</label>
+					<label class="tool-btn" for="ppg-joint-kind-weld" data-joint-kind="weld" title="Weld joint — the pair moves as one rigid unit"><input id="ppg-joint-kind-weld" type="radio" name="joint-kind" value="weld">
 						<svg viewBox="0 0 16 16" aria-hidden="true"><rect x="3.5" y="3.5" width="9" height="9" rx="1" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>
-					</button>
-					<button type="button" class="tool-btn" data-joint-kind="rod" aria-pressed="false" title="Rod joint — the pair keeps an exact distance">
+					</label>
+					<label class="tool-btn" for="ppg-joint-kind-rod" data-joint-kind="rod" title="Rod joint — the pair keeps an exact distance"><input id="ppg-joint-kind-rod" type="radio" name="joint-kind" value="rod">
 						<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 12L12 4" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><circle cx="4" cy="12" r="1.4" fill="currentColor"/><circle cx="12" cy="4" r="1.4" fill="currentColor"/></svg>
-					</button>
-					<button type="button" class="tool-btn" data-joint-kind="slider" aria-pressed="false" title="Slider joint — translation along one axis within limits">
+					</label>
+					<label class="tool-btn" for="ppg-joint-kind-slider" data-joint-kind="slider" title="Slider joint — translation along one axis within limits"><input id="ppg-joint-kind-slider" type="radio" name="joint-kind" value="slider">
 						<svg viewBox="0 0 16 16" aria-hidden="true"><rect x="3" y="7" width="10" height="2" fill="currentColor"/><path d="M4 4v8M12 4v8" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>
-					</button>
-					<button type="button" class="tool-btn" data-joint-kind="motor" aria-pressed="false" title="Motor joint — powered rotation at a target speed; click a placed motor's marker to toggle it">
+					</label>
+					<label class="tool-btn" for="ppg-joint-kind-motor" data-joint-kind="motor" title="Motor joint — powered rotation at a target speed"><input id="ppg-joint-kind-motor" type="radio" name="joint-kind" value="motor">
 						<svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="5" fill="none" stroke="currentColor" stroke-width="1.5"/><circle cx="8" cy="8" r="1.5" fill="currentColor"/><path d="M11.6 5.2a4 4 0 0 1 0 5.6" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
-					</button>
-					<button type="button" class="tool-btn" data-joint-kind="spring" aria-pressed="false" title="Spring joint — damped oscillation between two anchors (two clicks, like the rod)">
+					</label>
+					<label class="tool-btn" for="ppg-joint-kind-spring" data-joint-kind="spring" title="Spring joint — damped oscillation between two anchors"><input id="ppg-joint-kind-spring" type="radio" name="joint-kind" value="spring">
 						<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8h1.5l1-2.5L7.5 10.5l2-5 1.5 2.5H13" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
-					</button>
-					<button type="button" class="tool-btn" data-joint-kind="rope" aria-pressed="false" title="Rope — draw a stroke; Shift snaps direction (anchored at the last point); endpoints attach to bodies or the world">
+					</label>
+					<label class="tool-btn" for="ppg-joint-kind-rope" data-joint-kind="rope" title="Rope — draw a stroke; Shift snaps direction"><input id="ppg-joint-kind-rope" type="radio" name="joint-kind" value="rope">
 						<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 11.5q2.5-5 5.5-2.5t5.5-3.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
-					</button>
+					</label>
 				</span>
-				<button type="button" class="tool-btn" data-tool="circle" aria-label="Circle tool (C)" aria-pressed="false" title="Circle (C)">
+				<label class="tool-btn" for="ppg-tool-circle" data-tool="circle" title="Circle (C)"><input id="ppg-tool-circle" type="radio" name="tool" value="circle">
 					<svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="5" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>
-				</button>
-				<button type="button" class="tool-btn" data-tool="polygon" aria-label="Polygon tool (G)" aria-pressed="false" title="Polygon (G) — click vertices, click the first point or press Enter to close">
+				</label>
+				<label class="tool-btn" for="ppg-tool-polygon" data-tool="polygon" title="Polygon (G)"><input id="ppg-tool-polygon" type="radio" name="tool" value="polygon">
 					<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 2.5l5.5 4-2.1 6.5H4.6L2.5 6.5z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg>
-				</button>
-				<button type="button" class="tool-btn" data-tool="line" aria-label="Line tool (L)" aria-pressed="false" title="Line (L) — drag or click twice; Shift constrains to horizontal/vertical/45°">
+				</label>
+				<label class="tool-btn" for="ppg-tool-line" data-tool="line" title="Line (L)"><input id="ppg-tool-line" type="radio" name="tool" value="line">
 					<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 13L13 3" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><circle cx="3" cy="13" r="1.4" fill="currentColor"/><circle cx="13" cy="3" r="1.4" fill="currentColor"/></svg>
-				</button>
-				<button type="button" class="tool-btn" data-tool="freehand" aria-label="Freehand tool (F)" aria-pressed="false" title="Freehand (F) — drag to draw; circles, rectangles and triangles snap clean">
+				</label>
+				<label class="tool-btn" for="ppg-tool-freehand" data-tool="freehand" title="Freehand (F)"><input id="ppg-tool-freehand" type="radio" name="tool" value="freehand">
 					<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 11.5C4 6 6 4.5 8 7.5s4 2 5.5-3" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
-				</button>
-				<button type="button" class="tool-btn" data-tool="text" aria-label="Text tool (T)" aria-pressed="false" title="Text (T) — click to place a label, type, Enter or Escape to commit">
+				</label>
+				<label class="tool-btn" for="ppg-tool-text" data-tool="text" title="Text (T)"><input id="ppg-tool-text" type="radio" name="tool" value="text">
 					<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 3.5h10M8 3.5V13M5.5 13h5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
-				</button>
-				<button type="button" class="tool-btn" data-tool="thruster" aria-label="Thruster tool (H)" aria-pressed="false" title="Thruster (H) — click a body to mount a rocket; click its marker to toggle, tune strength in the panel">
+				</label>
+				<label class="tool-btn" for="ppg-tool-thruster" data-tool="thruster" title="Thruster (H)"><input id="ppg-tool-thruster" type="radio" name="tool" value="thruster">
 					<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8h7M10 8l-2.5-2M10 8l-2.5 2" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/><path d="M3 5.5v5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
-				</button>
+				</label>
 				<span class="tool-sep" aria-hidden="true"></span>
 				<button type="button" class="tool-btn" data-mode="static" aria-label="Static mode (S)" aria-pressed="false" title="Static mode (S) — box, circle, polygon, line and freehand spawns become terrain (infinite mass)">
 					<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2 11.5h12M2 11.5l4-5 4 3 4-6" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
