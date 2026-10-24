@@ -26,12 +26,12 @@ Rapier2D mapping (compat 0.21): pin = revolute joint; motor = revolute with conf
 
 ### P4-T4 — Spring and rope
 - Spring: stiffness/damping params, renders as a coil between anchors.
-- Rope: stroke or two-click placement producing a segment chain (bounded segment count per chain and total, line-run-style provisional limits), attach at both ends to bodies/world, rope rendered as a continuous curve.
+- Rope: freehand stroke placement converted to a segment chain (D18), with shift angle-snaps to horizontal/vertical/45° (anchored at the last freehand point, line-run pattern) and endpoint capture onto bodies/world. Bounded segment count per chain and total (provisional limits per D17); rope rendered as a continuous curve.
 - **Verify**: browser test: spring oscillator period scales with stiffness; rope bridge sags under a dropped box and holds it; chain total limits reject excess placement visibly. `make checkall`.
 - **Depends on**: P4-T2.
 
 ### P4-T5 — Thruster and machine demo scene
 - Thruster: attachable force applicator (direction arrow glyph, strength param, on/off) applying continuous force at its anchor.
-- Built-in demo scene: a Rube Goldberg starter — ramp, motorized conveyor, dominoes, rope-and-counterweight lift, thruster kick at the end — loadable from the toolbar as a template document.
+- Built-in demo scene: a Rube Goldberg starter — ramp, motorized conveyor, dominoes, rope-and-counterweight lift, thruster kick at the end — loadable from the top bar, and preloaded on first run with an obvious "New empty world" action (D16; first-run flag persisted).
 - **Verify**: browser test runs the demo scene end-to-end (deterministic hooks): the final object reaches the end marker; deleting any machine part leaves no orphan joints; undo restores the machine. `make checkall`.
 - **Depends on**: P4-T3, P4-T4.

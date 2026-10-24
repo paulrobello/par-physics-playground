@@ -23,7 +23,7 @@ Depends on: `plans/phase-2-drawing-and-editing.md`. Implements PRD P3 / D5, D6.
 - **Depends on**: P1-T4.
 
 ### P3-T4 — Impeccable pass: toolbar, material panel, sim controls
-- Run the `impeccable` skill over the accumulated UI: toolbar, panels, cursors, previews. Direction is fixed (D11): clean dark editor, subtle glows on hover/selection, hover lifts, soft shadows; no cream/italic/pill AI defaults.
+- Run the `impeccable` skill over the accumulated UI: top bar (sim controls, import/export, system settings), left tool rail, right context panels, cursors, previews. Direction is fixed (D11/D15): clean dark editor, subtle glows on hover/selection, hover lifts, soft shadows; no cream/italic/pill AI defaults.
 - Produce DESIGN.md tokens sidecar per the impeccable workflow; all later UI work conforms.
 - **Verify**: screenshot review against the direction contract by the impeccable finish-reviewer flow; browser visual-regression baselines captured for toolbar/panels. `make checkall`.
 - **Depends on**: P2-T1, P3-T2, P3-T3 (runs once the UI surface exists).

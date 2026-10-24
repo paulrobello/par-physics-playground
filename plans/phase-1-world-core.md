@@ -28,7 +28,7 @@ Install now: `@dimforge/rapier2d-compat@0.21.0`.
 - **Depends on**: P1-T1, P1-T2.
 
 ### P1-T4 — Pause/play/step + perf smoke
-- Sim control cluster: pause/play, single-step (advances exactly one tick via the debug advance path), reset world (clears dynamic bodies).
+- Sim control cluster in the top bar (D15): pause/play, single-step (advances exactly one tick via the debug advance path), reset world (clears dynamic bodies).
 - Perf smoke config (`playwright.perf`-style in the line-run pattern): spawn 200 boxes, measure 1000 frames after warmup, hardware Chromium with platform GPU flags, load guards before/after (host 1-min load ≤ 15).
 - **Verify**: browser test pauses mid-fall (positions frozen), steps once (advances exactly one tick); perf smoke reports 60fps at 200 bodies and the gate fails below target. `make checkall`.
 - **Depends on**: P1-T1, P1-T3.

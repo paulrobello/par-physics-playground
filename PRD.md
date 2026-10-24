@@ -63,6 +63,12 @@ Deferred post-MVP (wanted, not in the first release — tracked as Open Question
 | D12 | Stack: Vite + bun + TypeScript + Rapier2D (`@dimforge/rapier2d-compat`), rendered with plain Canvas2D (no three.js). |
 | D13 | Canonical domain `https://physics.pardev.net` via GitHub Pages. |
 | D14 | Full-depth local gate (`make checkall` / `make checkall-ci`); CI kept light (typecheck + lint + unit only; browser/perf tests run locally). |
+| D15 | Layout: left vertical tool rail + right context panel (material editor, joint params, properties by selection); top bar carries sim controls (pause/step/gravity/time-scale), import/export, scenes, and system settings. Canvas center stays uncluttered. |
+| D16 | First run preloads the Rube Goldberg demo scene (with an obvious "New empty world" action, remembered choice). |
+| D17 | Provisional safety caps with visible rejection at the limit: ~1200 dynamic bodies, ~1500 total collider parts, ~200 rope segments. Guards, not the perf target. |
+| D18 | Rope is drawn as a freehand stroke converted to a physical chain (line-run heritage), with shift angle-snaps to horizontal/vertical/45°; endpoint capture onto bodies/world. |
+| D19 | Uniform editing model: static/terrain objects are selectable, movable, duplicable, deletable like dynamic ones; static is only a physics property. |
+| D20 | Active-material workflow: new shapes take the active palette material; "apply to selection" repaints existing objects. |
 
 ## Reference projects
 

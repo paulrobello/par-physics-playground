@@ -18,7 +18,7 @@ Ports: dev 8113, browser-test 8114 (already registered in `~/.claude/used_ports.
 - **Depends on**: none.
 
 ### P0-T2 — Canvas app skeleton, HUD placeholder, debug hooks seam
-- `src/main.ts` boots a full-viewport Canvas2D canvas with devicePixelRatio handling and a resize observer; a DOM HUD placeholder (top bar) rendering "Par Physics Playground".
+- `src/main.ts` boots a full-viewport Canvas2D canvas with devicePixelRatio handling and a resize observer; a DOM HUD placeholder matching the D15 layout skeleton — top bar rendering "Par Physics Playground", empty left tool rail, empty right context panel.
 - Renderer module with a clear frame loop (rAF) that only clears and draws a placeholder; no simulation yet.
 - `?debug=1` flag parsed and stored (hooks added in P1).
 - **Verify**: `make dev` serves on 8113; Playwright smoke test loads the page headless-hardware and asserts the canvas element and HUD text; `make checkall` green.
