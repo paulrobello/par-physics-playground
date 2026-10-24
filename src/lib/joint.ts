@@ -32,7 +32,8 @@ export type JointType =
 	| "rod"
 	| "spring"
 	| "weld"
-	| "rope";
+	| "rope"
+	| "pulley";
 
 /**
  * Per-type parameters, discriminated on `kind` (matches the entity's
@@ -120,6 +121,24 @@ export type JointParams =
 			 * room; the panel edit replaces this one link's spring.
 			 */
 			readonly length: number;
+	  }
+	| {
+			readonly kind: "pulley";
+			/**
+			 * The wheel point in WORLD coordinates — a fixed scene attachment,
+			 * not a body (moving an endpoint never moves the wheel; the panel
+			 * readout shows it, the wheel is its own pickable glyph). Lives in
+			 * params so the whole pulley rides the JointEntity shape (undo,
+			 * save/load, assemblies) without touching the entity union.
+			 */
+			readonly wheelX: number;
+			readonly wheelY: number;
+			/**
+			 * Total rope length (world units): locked at placement to
+			 * dist(A→wheel) + dist(wheel→B). The rope only PULLS (tension ≥ 0),
+			 * so a path shorter than this hangs slack.
+			 */
+			readonly length: number;
 	  };
 
 /**
@@ -190,7 +209,8 @@ export type PlaceableJointKind =
 	| "slider"
 	| "motor"
 	| "spring"
-	| "rope";
+	| "rope"
+	| "pulley";
 
 /** DOM-validation guard for the tool rail's joint-kind buttons. */
 export function isPlaceableJointKind(
@@ -203,7 +223,8 @@ export function isPlaceableJointKind(
 		value === "slider" ||
 		value === "motor" ||
 		value === "spring" ||
-		value === "rope"
+		value === "rope" ||
+		value === "pulley"
 	);
 }
 
@@ -366,6 +387,7 @@ export const JOINT_TYPE_LABELS: Record<JointType, string> = {
 	spring: "Spring",
 	weld: "Weld",
 	rope: "Rope",
+	pulley: "Pulley",
 };
 
 /**
@@ -374,7 +396,8 @@ export const JOINT_TYPE_LABELS: Record<JointType, string> = {
  * anchor). Pin/weld/slider/motor derive BOTH anchors from `p2` (coincident
  * pivots — the T1 semantics; the motor is a powered pin), a rod uses `p1` and
  * `p2` as its two ENDPOINTS and takes its length from their distance. Returns
- * undefined for kinds without placement (spring/rope — P4-T4). The ONE
+ * undefined for kinds without this placement path (rope — P4-T4: the
+ * freehand stroke; pulley without the `wheel` third click). The ONE
  * placement computation shared by the joint tool (interaction.ts) and the
  * debug API, so both paths produce identical entities.
  */
@@ -387,6 +410,7 @@ export function makePlacedJoint(
 	p2: Vec2,
 	transformA: { x: number; y: number; rot: number },
 	transformB: { x: number; y: number; rot: number } | null,
+	wheel?: Vec2,
 ): JointEntity | undefined {
 	let params: JointParams;
 	let pivot: Vec2;
@@ -453,6 +477,25 @@ export function makePlacedJoint(
 			};
 			pivot = p2;
 			break;
+		case "pulley": {
+			// Three-click placement (two bodies + the fixed wheel): the wheel is
+			// a scene attachment in params, the rope length locks to the placed
+			// path through it, and the two clicks are the ENDPOINTS (anchors are
+			// body-local, like the rod's). The third click is the wheel, so a
+			// missing `wheel` is a refused placement.
+			if (!wheel) return undefined;
+			params = {
+				kind: "pulley",
+				wheelX: wheel.x,
+				wheelY: wheel.y,
+				length:
+					Math.hypot(wheel.x - p1.x, wheel.y - p1.y) +
+					Math.hypot(wheel.x - p2.x, wheel.y - p2.y),
+			};
+			pivot = p1;
+			endpointB = p2;
+			break;
+		}
 		default:
 			// Rope (the only remaining non-attached kind): placement is the
 			// freehand stroke path in interaction.ts, not a two-click attach.

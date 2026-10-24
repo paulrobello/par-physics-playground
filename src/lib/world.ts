@@ -33,6 +33,7 @@ import {
 	ROPE_LINK_STIFFNESS_PER_MASS,
 } from "./joint";
 import { MATERIAL_DEFAULT_ID } from "./material";
+import { PULLEY_MIN_LEG, solvePulleyImpulse } from "./pulley";
 import { type ThrusterEntity, thrusterWorldPose } from "./thruster";
 import {
 	cleanPolygon,
@@ -92,6 +93,23 @@ function rodEffectiveMass(
 	const mass = Math.min(massA, massB);
 	return Number.isFinite(mass) ? mass : 1;
 }
+
+/**
+ * Module-level scratch for the pulley tension walk (PRD P5 allocation card):
+ * every Vector-shaped value the per-tick walk touches goes through one of
+ * these records (Rapier's `target` arguments), so a tick with any number of
+ * pulleys allocates nothing. Safe across PhysicsWorld instances because the
+ * walk is synchronous — the records never escape step().
+ */
+const PULLEY_TRANS_A = { x: 0, y: 0 };
+const PULLEY_TRANS_B = { x: 0, y: 0 };
+const PULLEY_COM_A = { x: 0, y: 0 };
+const PULLEY_COM_B = { x: 0, y: 0 };
+const PULLEY_VEL_A = { x: 0, y: 0 };
+const PULLEY_VEL_B = { x: 0, y: 0 };
+const PULLEY_POINT_A = { x: 0, y: 0 };
+const PULLEY_POINT_B = { x: 0, y: 0 };
+const PULLEY_IMPULSE = { x: 0, y: 0 };
 
 let nextFragmentId = 1;
 
@@ -405,6 +423,24 @@ export class PhysicsWorld {
 				`[par-physics] Joint ${entity.id} rejected: body ${entity.bodyB} missing`,
 			);
 			return false;
+		}
+		if (entity.params.kind === "pulley") {
+			// Fixed pulley (post-MVP): a DOC-ONLY constraint behind the PRD R6
+			// custom-constraint seam — no Rapier impulse joint exists for a rope
+			// routed over a fixed wheel point. The per-tick tension in
+			// {@link applyPulleyTension} does the constraining; the registry
+			// entry stays absent and the removal cascade works through the
+			// document (removeJoint skips the missing impulse joint).
+			// Both DYNAMIC endpoints wake here (Rapier's
+			// createImpulseJoint(wakeUp=true) precedent): at the exact placed
+			// length the solve returns zero, so a SLEEPING body would hang
+			// frozen forever — nothing else wakes it. Static endpoints never
+			// sleep-simulate, so they are left untouched.
+			if (!bodyB) throw new Error("world not initialised");
+			if (bodyA.isDynamic()) bodyA.wakeUp();
+			if (bodyB.isDynamic()) bodyB.wakeUp();
+			this.doc.add(entity);
+			return true;
 		}
 		let data: RAPIER.JointData;
 		// Narrowed kind for the loud-refusal message below: the switch covers
@@ -1089,9 +1125,104 @@ export class PhysicsWorld {
 		for (const fragment of fragments) this.spawnEntity(fragment);
 	}
 
+	/**
+	 * Apply every pulley's one-sided rope tension (post-MVP fixed pulley):
+	 * the doc-only constraint (spawnJoint's pulley branch) is driven per tick
+	 * BEFORE the Rapier step, so the impulses integrate this tick. Equal
+	 * tension on both legs (the ideal fixed pulley): one impulse magnitude
+	 * from {@link solvePulleyImpulse}, applied at both anchor points toward
+	 * the wheel. K assembles the angular-aware effective mass — per body
+	 * invMass + (r×û)²·invI with r the anchor's lever arm from the COM — so
+	 * off-center anchors pull with the correct reduced tension and are
+	 * torqued by the same impulse. Static endpoints (invMass 0, invI 0)
+	 * contribute nothing to K — no finite fake mass. A zero impulse is
+	 * skipped so a slack pulley never keeps its bodies awake.
+	 *
+	 * Bound field + {@link SceneDocument.eachJoint} + the PULLEY_* scratch
+	 * records: a tick allocates nothing, on the no-pulley path (kind check
+	 * only) and the steady-state pulley path alike. Anchor world positions
+	 * are inlined from localPointToWorld — the shared helper returns a fresh
+	 * Vec2, which the walk may not do.
+	 */
+	private readonly applyPulleyTick = (e: JointEntity): void => {
+		if (e.params.kind !== "pulley") return;
+		const bodyA = this.bodies.get(e.bodyA);
+		const bodyB = e.bodyB === null ? this.groundBody : this.bodies.get(e.bodyB);
+		if (!bodyA || !bodyB) return;
+		// A null bodyB anchors to the ground, whose identity transform reduces
+		// to the stored world point — same result as jointWorldAnchors.
+		const ta = bodyA.translation(PULLEY_TRANS_A);
+		const rotA = bodyA.rotation();
+		const cosA = Math.cos(rotA);
+		const sinA = Math.sin(rotA);
+		const ax = ta.x + e.anchorA.x * cosA - e.anchorA.y * sinA;
+		const ay = ta.y + e.anchorA.x * sinA + e.anchorA.y * cosA;
+		const tb = bodyB.translation(PULLEY_TRANS_B);
+		const rotB = bodyB.rotation();
+		const cosB = Math.cos(rotB);
+		const sinB = Math.sin(rotB);
+		const bx = tb.x + e.anchorB.x * cosB - e.anchorB.y * sinB;
+		const by = tb.y + e.anchorB.x * sinB + e.anchorB.y * cosB;
+		const dax = ax - e.params.wheelX;
+		const day = ay - e.params.wheelY;
+		const dbx = bx - e.params.wheelX;
+		const dby = by - e.params.wheelY;
+		const dA = Math.hypot(dax, day);
+		const dB = Math.hypot(dbx, dby);
+		if (dA < PULLEY_MIN_LEG || dB < PULLEY_MIN_LEG) return;
+		const uax = dax / dA;
+		const uay = day / dA;
+		const ubx = dbx / dB;
+		const uby = dby / dB;
+		// Path surplus and its rate: velocities are the anchor POINT
+		// velocities (COM velocity + ω×r via velocityAtPoint), so angular
+		// motion feeds the rope rate correctly.
+		PULLEY_POINT_A.x = ax;
+		PULLEY_POINT_A.y = ay;
+		PULLEY_POINT_B.x = bx;
+		PULLEY_POINT_B.y = by;
+		const vA = bodyA.velocityAtPoint(PULLEY_POINT_A, PULLEY_VEL_A);
+		const vB = bodyB.velocityAtPoint(PULLEY_POINT_B, PULLEY_VEL_B);
+		const cv = uax * vA.x + uay * vA.y + (ubx * vB.x + uby * vB.y);
+		// Total inverse effective mass along the rope directions.
+		const comA = bodyA.worldCom(PULLEY_COM_A);
+		const comB = bodyB.worldCom(PULLEY_COM_B);
+		const rax = ax - comA.x;
+		const ray = ay - comA.y;
+		const rbx = bx - comB.x;
+		const rby = by - comB.y;
+		const kA = rax * uay - ray * uax;
+		const kB = rbx * uby - rby * ubx;
+		const k =
+			bodyA.invMass() +
+			bodyB.invMass() +
+			kA * kA * bodyA.effectiveWorldInvInertia() +
+			kB * kB * bodyB.effectiveWorldInvInertia();
+		const j = solvePulleyImpulse(
+			dA + dB - e.params.length,
+			cv,
+			k,
+			SIM_DT_SECONDS,
+		);
+		if (j <= 0) return;
+		// Equal tension pulling each anchor toward the wheel; applied at the
+		// anchor point, the same impulse torques an off-center anchor.
+		PULLEY_IMPULSE.x = -uax * j;
+		PULLEY_IMPULSE.y = -uay * j;
+		bodyA.applyImpulseAtPoint(PULLEY_IMPULSE, PULLEY_POINT_A, true);
+		PULLEY_IMPULSE.x = -ubx * j;
+		PULLEY_IMPULSE.y = -uby * j;
+		bodyB.applyImpulseAtPoint(PULLEY_IMPULSE, PULLEY_POINT_B, true);
+	};
+
+	private applyPulleyTension(): void {
+		this.doc.eachJoint(this.applyPulleyTick);
+	}
+
 	/** One fixed tick: advance physics, then cull bodies below the kill threshold. */
 	step(): void {
 		this.applyThrusters();
+		this.applyPulleyTension();
 		this.world.step(this.contactEvents);
 		if (this.brittleColliders.size > 0) this.processBrittleImpacts();
 		for (const [id, body] of this.bodies) {

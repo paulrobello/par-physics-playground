@@ -255,7 +255,18 @@ export type DrawPreview =
 	| { kind: "stroke"; points: readonly Vec2[] }
 	| { kind: "text"; x: number; y: number; text: string }
 	/** Joint tool arming: first anchor to the cursor; `toBody` highlights a valid second endpoint. */
-	| { kind: "joint"; from: Vec2; to: Vec2; toBody: boolean };
+	| {
+			kind: "joint";
+			from: Vec2;
+			to: Vec2;
+			toBody: boolean;
+			/**
+			 * Pulley third-click phase: both anchors are fixed and this is the
+			 * wheel point under the cursor — the preview draws the rope path
+			 * from→wheel→to instead of the single attach line.
+			 */
+			wheel?: Vec2;
+	  };
 
 /** Beam centered on the segment midpoint, oriented along it, min length clamped. */
 export function beamFromSegment(
@@ -518,7 +529,8 @@ export interface ToolSessionEvents {
 	 * session selects it (D19: a joint selects, deletes like any entity), or
 	 * undefined when the placement was refused (missing body, unmaterialized
 	 * kind). Optional so test doubles and headless harnesses that never place
-	 * joints can omit it.
+	 * joints can omit it. `wheelX/Y` carries the pulley's third click (the
+	 * fixed wheel point); other kinds omit it.
 	 */
 	onPlaceJoint?(spec: {
 		readonly bodyAId: string;
@@ -528,6 +540,8 @@ export interface ToolSessionEvents {
 		readonly anchorY: number;
 		readonly x: number;
 		readonly y: number;
+		readonly wheelX?: number;
+		readonly wheelY?: number;
 	}): string | undefined;
 	/**
 	 * The thruster tool placed a mount: a single click on body `bodyId` at
@@ -628,6 +642,23 @@ type Phase =
 	  }
 	| {
 			/**
+			 * Pulley third-click phase (post-MVP): two bodies armed, the next
+			 * click anywhere sets the fixed wheel point. The B anchor is the
+			 * already-taken second click, carried here so the wheel click does
+			 * not displace it.
+			 */
+			readonly kind: "joint-wheel";
+			readonly bodyAId: string;
+			readonly bodyBId: string;
+			readonly anchorX: number;
+			readonly anchorY: number;
+			readonly anchorBX: number;
+			readonly anchorBY: number;
+			curX: number;
+			curY: number;
+	  }
+	| {
+			/**
 			 * Rope placement (P4-T4, D18): a freehand stroke drawn while the
 			 * joint tool's rope kind is active; the release converts it to a
 			 * segment chain. Shift angle-snaps each new sample to
@@ -658,6 +689,19 @@ export class ToolSession {
 	 * from it via {@link makePlacedJoint}. Default pin (the T1 behavior).
 	 */
 	jointKind: PlaceableJointKind = "pin";
+
+	/**
+	 * Set the placement kind from the tool rail. Changing kind mid-gesture
+	 * cancels the gesture outright (the setTool teardown): an armed pulley
+	 * must not leak its two taken clicks into a different kind's placement.
+	 * With nothing in progress this is a plain field set — the selection and
+	 * any idle state are untouched.
+	 */
+	setJointKind(kind: PlaceableJointKind): void {
+		if (kind === this.jointKind) return;
+		if (this.phase.kind !== "idle") this.cancel();
+		this.jointKind = kind;
+	}
 	/** Body under the pointer (hover), updated by pointerMove when idle. */
 	hoverId: string | undefined;
 	/** Currently selected bodies, in no particular order. */
@@ -742,6 +786,16 @@ export class ToolSession {
 				from: { x: this.phase.anchorX, y: this.phase.anchorY },
 				to: { x: this.phase.curX, y: this.phase.curY },
 				toBody: this.pick(this.phase.curX, this.phase.curY) !== undefined,
+			};
+		}
+		if (this.phase.kind === "joint-wheel") {
+			// Rope preview: both anchors fixed, the wheel follows the cursor.
+			return {
+				kind: "joint",
+				from: { x: this.phase.anchorX, y: this.phase.anchorY },
+				to: { x: this.phase.anchorBX, y: this.phase.anchorBY },
+				toBody: true,
+				wheel: { x: this.phase.curX, y: this.phase.curY },
 			};
 		}
 		if (this.phase.kind === "rope-draw") {
@@ -900,9 +954,38 @@ export class ToolSession {
 			// world (pin-to-world). The joint is placed AT the second click.
 			// Clicking bodyA again aborts the arming (a self-joint is refused).
 			const { bodyAId, anchorX, anchorY } = this.phase;
+			if (this.jointKind === "pulley") {
+				// Pulley needs TWO bodies: a second click on empty space or on
+				// bodyA itself aborts the arming; a body enters the wheel
+				// (third-click) phase. Every abort drops the snapshot the
+				// arming press took (onCancelAction) so a later placement's
+				// commit cannot inherit it and undo would rewind past it.
+				this.phase = { kind: "idle" };
+				const hitId = this.pick(wx, wy);
+				if (!hitId || hitId === bodyAId) {
+					this.events.onCancelAction?.();
+					return;
+				}
+				this.phase = {
+					kind: "joint-wheel",
+					bodyAId,
+					bodyBId: hitId,
+					anchorX,
+					anchorY,
+					anchorBX: wx,
+					anchorBY: wy,
+					curX: wx,
+					curY: wy,
+				};
+				return;
+			}
 			this.phase = { kind: "idle" };
 			const hitId = this.pick(wx, wy);
-			if (hitId === bodyAId) return;
+			if (hitId === bodyAId) {
+				// Self-joint abort (see the pulley comment): drop the snapshot.
+				this.events.onCancelAction?.();
+				return;
+			}
 			const jointId = this.events.onPlaceJoint?.({
 				bodyAId,
 				bodyBId: hitId ?? null,
@@ -911,6 +994,25 @@ export class ToolSession {
 				anchorY,
 				x: wx,
 				y: wy,
+			});
+			if (jointId) this.selectedIds = new Set([jointId]);
+			return;
+		}
+		if (this.phase.kind === "joint-wheel") {
+			// Third click: the fixed wheel point, anywhere (the wheel is a
+			// scene attachment, not a body pick).
+			const p = this.phase;
+			this.phase = { kind: "idle" };
+			const jointId = this.events.onPlaceJoint?.({
+				bodyAId: p.bodyAId,
+				bodyBId: p.bodyBId,
+				jointKind: this.jointKind,
+				anchorX: p.anchorX,
+				anchorY: p.anchorY,
+				x: p.anchorBX,
+				y: p.anchorBY,
+				wheelX: wx,
+				wheelY: wy,
 			});
 			if (jointId) this.selectedIds = new Set([jointId]);
 			return;
@@ -1104,7 +1206,10 @@ export class ToolSession {
 			this.phase = { ...this.phase, curX: wx, curY: wy };
 			return;
 		}
-		if (this.phase.kind === "joint-arming") {
+		if (
+			this.phase.kind === "joint-arming" ||
+			this.phase.kind === "joint-wheel"
+		) {
 			this.phase = { ...this.phase, curX: wx, curY: wy };
 			return;
 		}

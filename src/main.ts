@@ -109,7 +109,9 @@ function listPickableLabels(): {
 	}));
 }
 
-/** Joints with live glyph positions (pick order, topmost last). */
+/** Joints with live glyph positions (pick order, topmost last). A pulley is
+ * pickable at its wheel too — the wheel is its own glyph, separate from the
+ * body anchors. */
 function listPickableJoints(): { id: string; wx: number; wy: number }[] {
 	const w = world;
 	if (!w) return [];
@@ -117,6 +119,8 @@ function listPickableJoints(): { id: string; wx: number; wy: number }[] {
 	for (const e of w.jointEntities()) {
 		const anchor = w.jointWorldAnchor(e);
 		if (anchor) out.push({ id: e.id, wx: anchor.x, wy: anchor.y });
+		if (e.params.kind === "pulley")
+			out.push({ id: e.id, wx: e.params.wheelX, wy: e.params.wheelY });
 	}
 	return out;
 }
@@ -174,6 +178,8 @@ const sceneView = {
 			motorOn: boolean,
 			wx2: number,
 			wy2: number,
+			wx3: number,
+			wy3: number,
 		) => void,
 	): void {
 		const w = world;
@@ -189,6 +195,8 @@ const sceneView = {
 					e.params.kind === "motor" ? e.params.on : true,
 					anchors.b.x,
 					anchors.b.y,
+					e.params.kind === "pulley" ? e.params.wheelX : anchors.b.x,
+					e.params.kind === "pulley" ? e.params.wheelY : anchors.b.y,
 				);
 		});
 	},

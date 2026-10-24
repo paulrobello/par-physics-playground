@@ -86,7 +86,9 @@ export function captureAssembly(
 
 	// Normalize around the positioned entities' centroid; a world-pinned
 	// anchorB moves with the assembly (it is the one joint coordinate that is
-	// a world point rather than body-local).
+	// a world point rather than body-local), and a pulley's wheel is the
+	// other one — it lives in the params record and shifts with the same
+	// offset so the stamped rope still routes through the stamped wheel.
 	let sx = 0;
 	let sy = 0;
 	for (const e of captured) {
@@ -102,6 +104,15 @@ export function captureAssembly(
 			return { ...e, x: e.x - cx, y: e.y - cy };
 		if (e.kind === "joint" && e.bodyB === null)
 			return { ...e, anchorB: { x: e.anchorB.x - cx, y: e.anchorB.y - cy } };
+		if (e.kind === "joint" && e.params.kind === "pulley")
+			return {
+				...e,
+				params: {
+					...e.params,
+					wheelX: e.params.wheelX - cx,
+					wheelY: e.params.wheelY - cy,
+				},
+			};
 		return e;
 	});
 
@@ -209,6 +220,14 @@ export function stampAssembly(
 					e.bodyB === null
 						? { x: e.anchorB.x + dx, y: e.anchorB.y + dy }
 						: structuredClone(e.anchorB),
+				params:
+					e.params.kind === "pulley"
+						? {
+								...e.params,
+								wheelX: e.params.wheelX + dx,
+								wheelY: e.params.wheelY + dy,
+							}
+						: e.params,
 			});
 			if (ok) spawned.push(id);
 		} else if (e.kind === "thruster") {

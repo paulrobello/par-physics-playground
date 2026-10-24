@@ -181,6 +181,31 @@ function checkEntity(raw: unknown, index: number): string | null {
 					return `joint ${String(e.id)} params.${key}: not finite`;
 				}
 			}
+			if (params.kind === "pulley") {
+				// The wheel is a world point like a body center and the rope
+				// length must be a usable positive length: bounded validation
+				// (provisional like the body bounds) — a 1e100 length could never
+				// go taut and a mistyped field would zero the tension solve.
+				const length = params.length;
+				if (
+					typeof length !== "number" ||
+					!Number.isFinite(length) ||
+					length <= 0 ||
+					length > 4 * SCENE_BOUNDS.maxAbsCoord
+				) {
+					return `joint ${String(e.id)} params.length ${String(length)} outside (0, ${4 * SCENE_BOUNDS.maxAbsCoord}]`;
+				}
+				for (const key of ["wheelX", "wheelY"] as const) {
+					const v = params[key];
+					if (
+						typeof v !== "number" ||
+						!Number.isFinite(v) ||
+						Math.abs(v) > SCENE_BOUNDS.maxAbsCoord
+					) {
+						return `joint ${String(e.id)} params.${key} ${String(v)} outside ±${SCENE_BOUNDS.maxAbsCoord}`;
+					}
+				}
+			}
 		}
 		return null;
 	}

@@ -650,3 +650,140 @@ describe("ToolSession — line tool", () => {
 		expect(log).toEqual([]); // cancelled: nothing commits
 	});
 });
+
+describe("ToolSession — joint tool (review F3/F4)", () => {
+	/** Two bodies under the pick fn; events record begin/cancel/place. The
+	 * required ToolSessionEvents members take no-op bodies (this describe
+	 * only exercises the joint placement gesture). */
+	function makeJointSession(
+		pick: (x: number, y: number) => string | undefined,
+	) {
+		const log: [string, unknown][] = [];
+		const events: ToolSessionEvents = {
+			onSpawnBox() {},
+			onSpawnCircle() {},
+			onSpawnPolygon() {},
+			onSpawnLine() {},
+			onSpawnFreehand() {},
+			onCreateLabel(pos) {
+				return `label-${log.length}`;
+			},
+			onCommitLabel() {},
+			onDragStart() {},
+			onDragMove() {},
+			onDragEnd() {},
+			onRotateStart() {},
+			onRotate() {},
+			onRotateEnd() {},
+			onDelete() {},
+			onDuplicate(ids) {
+				return ids.map((id) => `copy-${id}`);
+			},
+			onBeginAction() {
+				log.push(["begin", null]);
+			},
+			onCancelAction() {
+				log.push(["cancel", null]);
+			},
+			onPlaceJoint(spec) {
+				log.push(["place", spec.jointKind]);
+				return "j-new";
+			},
+		};
+		return { session: new ToolSession(events, pick), log };
+	}
+	const pickBodies = (x: number, y: number) => {
+		if (x === 0 && y === 0) return "b1";
+		if (x === 40 && y === 0) return "b2";
+		return undefined;
+	};
+
+	test("second click on empty space aborts the pulley and drops the snapshot", () => {
+		const { session, log } = makeJointSession(pickBodies);
+		session.setTool("joint"); // setTool itself cancels (pre-existing teardown)
+		session.jointKind = "pulley";
+		session.pointerDown(0, 0);
+		expect(log).toEqual([
+			["cancel", null],
+			["begin", null],
+		]);
+		session.pointerDown(100, 100); // empty space
+		expect(log).toEqual([
+			["cancel", null],
+			["begin", null],
+			["cancel", null],
+		]);
+		// No wheel phase lingers: the next press is a fresh arming.
+		session.pointerDown(40, 0);
+		expect(log).toEqual([
+			["cancel", null],
+			["begin", null],
+			["cancel", null],
+			["begin", null],
+		]);
+	});
+
+	test("second click on bodyA aborts the pulley and drops the snapshot", () => {
+		const { session, log } = makeJointSession(pickBodies);
+		session.setTool("joint");
+		session.jointKind = "pulley";
+		session.pointerDown(0, 0);
+		session.pointerDown(0, 0); // bodyA again
+		expect(log).toEqual([
+			["cancel", null],
+			["begin", null],
+			["cancel", null],
+		]);
+	});
+
+	test("two-click self-joint abort also drops the snapshot (pre-existing flaw)", () => {
+		const { session, log } = makeJointSession(pickBodies);
+		session.setTool("joint");
+		session.pointerDown(0, 0);
+		session.pointerDown(0, 0); // bodyA again — pin abort
+		expect(log).toEqual([
+			["cancel", null],
+			["begin", null],
+			["cancel", null],
+		]);
+	});
+
+	test("changing jointKind mid-placement cancels the gesture (F3)", () => {
+		const { session, log } = makeJointSession(pickBodies);
+		session.setTool("joint");
+		session.jointKind = "pulley";
+		session.pointerDown(0, 0); // arm A
+		session.pointerDown(40, 0); // arm B — wheel phase
+		expect(log).toEqual([
+			["cancel", null],
+			["begin", null],
+		]);
+		// The kind radio changes: the gesture dies, the snapshot drops.
+		session.setJointKind("rod");
+		expect(log).toEqual([
+			["cancel", null],
+			["begin", null],
+			["cancel", null],
+		]);
+		// The next two clicks place a ROD from ITS OWN two clicks, not a rod
+		// from the pulley's clicks.
+		session.pointerDown(0, 0);
+		session.pointerDown(40, 0);
+		expect(log.at(-1)).toEqual(["place", "rod"]);
+	});
+
+	test("setJointKind with nothing in progress does not touch selection", () => {
+		const { session, log } = makeJointSession(() => undefined);
+		session.setTool("select");
+		session.pointerDown(100, 100); // empty space: rubber-band, no drag
+		session.pointerUp();
+		session.selectedIds.add("b1");
+		log.length = 0; // setup noise (tool-switch cancels) is not the subject
+		session.setTool("joint");
+		session.setJointKind("pulley");
+		expect(session.jointKind).toBe("pulley");
+		expect(session.selectedIds.has("b1")).toBe(true);
+		// setTool logs its own teardown-cancel; the IDLE kind switch adds none.
+		expect(log).toEqual([["cancel", null]]);
+	});
+});

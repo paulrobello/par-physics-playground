@@ -220,6 +220,14 @@ export function attachJointPanel(deps: JointPanelDeps): () => void {
 					if (Number.isFinite(value) && value > 0)
 						applyParams(id, { kind: "rope", length: value });
 				});
+		} else if (params.kind === "pulley") {
+			// Pulley readouts (post-MVP): rope length and wheel coordinates are
+			// READ-ONLY — the approved design locks the length at placement and
+			// the wheel is a scene attachment; neither is panel-editable.
+			paramsEl.innerHTML = `
+				<p class="joint-field">Rope length: ${params.length.toFixed(1)}</p>
+				<p class="joint-field">Wheel: ${params.wheelX.toFixed(1)}, ${params.wheelY.toFixed(1)}</p>
+			`;
 		}
 	};
 

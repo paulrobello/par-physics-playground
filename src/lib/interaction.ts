@@ -667,7 +667,8 @@ export function createToolEvents(
 				return undefined;
 			}
 			// T2: the tool's joint kind drives the params; makePlacedJoint is the
-			// ONE placement computation (shared with the debug API).
+			// ONE placement computation (shared with the debug API). The pulley's
+			// third-click wheel point rides the spec (absent for other kinds).
 			const entity = makePlacedJoint(
 				freshJointId(),
 				spec.jointKind,
@@ -687,6 +688,9 @@ export function createToolEvents(
 							rot: bodyB.rotation(),
 						}
 					: null,
+				spec.wheelX !== undefined
+					? { x: spec.wheelX, y: spec.wheelY ?? 0 }
+					: undefined,
 			);
 			if (!entity || !world.spawnJoint(entity)) {
 				deps?.cancelAction?.();
@@ -824,7 +828,9 @@ export function attachToolControls(deps: ToolControlsDeps): () => void {
 		if (input.name === "tool" && isToolId(input.value)) {
 			setToolAndSync(input.value);
 		} else if (input.name === "joint-kind") {
-			if (isPlaceableJointKind(input.value)) session.jointKind = input.value;
+			// setJointKind cancels an in-progress placement gesture — a kind
+			// switch mid-placement must not leak the taken clicks across.
+			if (isPlaceableJointKind(input.value)) session.setJointKind(input.value);
 			syncToolbar();
 		}
 	});
@@ -986,12 +992,16 @@ export function attachToolControls(deps: ToolControlsDeps): () => void {
 
 	const onKeyDown = (event: KeyboardEvent): void => {
 		// Duplicate takes Ctrl/Cmd+D; the other shortcuts reject modifiers.
-		// Text-entry targets keep their keys (matches camera-controls).
+		// Text-entry targets keep their keys (matches camera-controls) — but
+		// Escape always cancels: the joint-kind radios keep FOCUS after their
+		// label click, and the pulley's three-click flow must cancel with the
+		// radio still focused (a focused number input keeps its value too).
 		if (
 			event.target instanceof HTMLElement &&
 			(event.target.tagName === "INPUT" ||
 				event.target.tagName === "TEXTAREA" ||
-				event.target.isContentEditable)
+				event.target.isContentEditable) &&
+			event.code !== "Escape"
 		)
 			return;
 		// Inline label edit: keys are the label text itself. Enter and Escape

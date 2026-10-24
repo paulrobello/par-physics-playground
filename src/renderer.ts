@@ -48,6 +48,12 @@ export interface SceneView {
 			/** Live world position of the second anchor (P4-T4 rope/spring drawing). */
 			wx2: number,
 			wy2: number,
+			/**
+			 * The pulley's fixed wheel point (pulleys only; anchor B's position
+			 * for every other kind, unused there — a pulley draws through it).
+			 */
+			wx3: number,
+			wy3: number,
 		) => void,
 	): void;
 	/** Thrusters with their live poses, in document order (P4-T5). */
@@ -468,10 +474,28 @@ export function createRenderer(
 		// the blur raster is per-draw, and rope-heavy scenes draw hundreds of
 		// links. Shadow state toggles per item (selected only).
 		ctx.strokeStyle = ACCENT_COLOR;
-		scene.forEachJoint((id, jointType, wx, wy, motorOn, wx2, wy2) => {
+		scene.forEachJoint((id, jointType, wx, wy, motorOn, wx2, wy2, wx3, wy3) => {
 			const isSel = selected.has(id);
 			ctx.shadowColor = isSel ? HOVER_GLOW : "transparent";
 			ctx.shadowBlur = isSel ? HOVER_GLOW_BLUR_PX : 0;
+			if (jointType === "pulley") {
+				// Fixed pulley (post-MVP): the two rope lines through the wheel
+				// ARE the glyph's body, with a wheel circle at the scene point —
+				// no anchor ring (the rope-link convention). Selection glow from
+				// the shadow state above; screen-constant widths via 1/zoom.
+				ctx.save();
+				ctx.lineWidth = (isSel ? 2 : 1.2) / zoom;
+				ctx.beginPath();
+				ctx.moveTo(wx, wy);
+				ctx.lineTo(wx3, wy3);
+				ctx.lineTo(wx2, wy2);
+				ctx.stroke();
+				ctx.beginPath();
+				ctx.arc(wx3, wy3, r, 0, Math.PI * 2);
+				ctx.stroke();
+				ctx.restore();
+				return;
+			}
 			if (jointType === "rope") {
 				// Rope link (P4-T4): no ring, no inner glyph — the chain of
 				// stroked link lines IS the rope's continuous curve through the
@@ -769,10 +793,27 @@ export function createRenderer(
 		} else if (p.kind === "joint") {
 			// Joint attach preview: accent line from the first anchor to the
 			// cursor, endpoint rings at both ends; the far end's ring is dashed
-			// when it is over empty space (world anchor).
+			// when it is over empty space (world anchor). With `wheel` set (the
+			// pulley's third-click phase) the preview draws the rope path
+			// from→wheel→to with the wheel glyph under the cursor instead.
 			ctx.save();
 			ctx.shadowColor = "transparent";
 			ctx.shadowBlur = 0;
+			if (p.wheel) {
+				ctx.beginPath();
+				ctx.moveTo(p.from.x, p.from.y);
+				ctx.lineTo(p.wheel.x, p.wheel.y);
+				ctx.lineTo(p.to.x, p.to.y);
+				ctx.stroke();
+				ctx.beginPath();
+				ctx.arc(p.wheel.x, p.wheel.y, jointGlyphRadius(zoom), 0, Math.PI * 2);
+				ctx.stroke();
+				ctx.beginPath();
+				ctx.arc(p.to.x, p.to.y, jointGlyphRadius(zoom), 0, Math.PI * 2);
+				ctx.stroke();
+				ctx.restore();
+				return;
+			}
 			ctx.beginPath();
 			ctx.moveTo(p.from.x, p.from.y);
 			ctx.lineTo(p.to.x, p.to.y);
