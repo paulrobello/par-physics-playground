@@ -5,6 +5,8 @@
 import type { Camera, CameraState } from "./camera";
 import type { SimClock } from "./clock";
 import type { BodyShape } from "./document";
+import type { Material } from "./material";
+import type { TimeScale } from "./sim-controls";
 import type { ToolSession } from "./tools";
 import type { UndoStack } from "./undo";
 import type { DocumentId, PhysicsWorld } from "./world";
@@ -14,10 +16,39 @@ export interface DebugApi {
 	advanceTime(ms: number): void;
 	/** Advance the simulation exactly one tick, ignoring pause. */
 	stepOnce(): void;
-	/** Drop a dynamic box (half extents `hx` × `hy`) at world position (x, y). */
-	spawnBox(id: DocumentId, x: number, y: number, hx: number, hy: number): void;
-	/** Drop a dynamic ball of radius `r` at world position (x, y). */
-	spawnCircle(id: DocumentId, x: number, y: number, r: number): void;
+	/**
+	 * Set the live world gravity (m/s², y-down convention): applies on the next
+	 * tick; sleeping bodies wake immediately.
+	 */
+	setGravityVector(x: number, y: number): void;
+	/** The live gravity vector (m/s²). */
+	gravity(): { x: number; y: number };
+	/** Set the accumulator feed-rate scale (clamped to 0.25×–2×). */
+	setTimeScale(scale: number): void;
+	/** The current accumulator feed-rate scale. */
+	timeScale(): number;
+	/**
+	 * Drop a box (half extents `hx` × `hy`) at world position (x, y); optional
+	 * material id (default ink) and static flag (terrain ramps for tests).
+	 */
+	spawnBox(
+		id: DocumentId,
+		x: number,
+		y: number,
+		hx: number,
+		hy: number,
+		materialId?: string,
+		isStatic?: boolean,
+	): void;
+	/** Drop a ball of radius `r` at world position (x, y). */
+	spawnCircle(
+		id: DocumentId,
+		x: number,
+		y: number,
+		r: number,
+		isStatic?: boolean,
+		materialId?: string,
+	): void;
 	/** All registered body ids, in spawn order. */
 	bodyIds(): DocumentId[];
 	/** Current world position of a registered body, or undefined if culled. */
@@ -32,6 +63,14 @@ export interface DebugApi {
 	bodyIsSleeping(id: DocumentId): boolean | undefined;
 	/** Whether a registered body is static (terrain). */
 	bodyIsStatic(id: DocumentId): boolean | undefined;
+	/** The registered body's resolved material, or undefined. */
+	bodyMaterial(id: DocumentId): Material | undefined;
+	/** Mass Rapier derived for a registered body, or undefined. */
+	bodyMass(id: DocumentId): number | undefined;
+	/** All registered materials (palette + customs), registry order. */
+	materials(): Material[];
+	/** The material id new draw-tool spawns take (panel active material). */
+	activeMaterialId(): string;
 	/** All label ids, in document order. */
 	labelIds(): DocumentId[];
 	/** A label's position, rotation, and text, or undefined. */
@@ -66,6 +105,8 @@ export function installDebugApi(
 	camera: Camera,
 	session: ToolSession,
 	undo: UndoStack,
+	activeMaterialId: () => string,
+	timeScale: TimeScale,
 ): DebugApi {
 	const api: DebugApi = {
 		advanceTime(ms) {
@@ -74,12 +115,34 @@ export function installDebugApi(
 		stepOnce() {
 			clock.stepOnce();
 		},
-		spawnBox(id, x, y, hx, hy) {
-			world.spawnBox(id, x, y, hx, hy);
+		setGravityVector(x, y) {
+			world.setGravity(x, y);
 		},
-		spawnCircle(id, x, y, r) {
-			world.spawnCircle(id, x, y, r);
+		gravity() {
+			const g = world.gravity;
+			return { x: g.x, y: g.y };
 		},
+		setTimeScale(scale) {
+			timeScale.set(scale);
+		},
+		timeScale: () => timeScale.value,
+		spawnBox(id, x, y, hx, hy, materialId, isStatic) {
+			world.spawnBox(id, x, y, hx, hy, materialId, isStatic);
+		},
+		spawnCircle(id, x, y, r, isStatic, materialId) {
+			world.spawnCircle(id, x, y, r, isStatic, materialId);
+		},
+		bodyMaterial(id) {
+			const e = world.doc.get(id);
+			return e?.kind === "body" ? world.doc.material(e.materialId) : undefined;
+		},
+		bodyMass(id) {
+			return world.bodies.get(id)?.mass();
+		},
+		materials() {
+			return world.doc.allMaterials();
+		},
+		activeMaterialId: () => activeMaterialId(),
 		bodyIds() {
 			return [...world.bodies.keys()];
 		},

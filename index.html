@@ -20,6 +20,28 @@
 					<button type="button" class="tool-btn" data-sim="reset" aria-label="Reset world" title="Reset world">
 						<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 3a5 5 0 1 1-4.9 6h1.55A3.5 3.5 0 1 0 8 4.5V6L4.5 3.5 8 1z" fill="currentColor"/></svg>
 					</button>
+					<span class="sim-sep" aria-hidden="true"></span>
+					<div class="sim-field">
+						<label for="sim-gravity-angle">Gravity</label>
+						<input id="sim-gravity-angle" data-sim="gravity-angle" type="range" min="0" max="359" step="1" value="0" aria-label="Gravity direction, degrees clockwise from down" />
+						<output data-sim="gravity-angle-out" for="sim-gravity-angle">0°</output>
+					</div>
+					<div class="sim-field">
+						<label for="sim-gravity-mag">Mag</label>
+						<input id="sim-gravity-mag" data-sim="gravity-mag" type="range" min="0" max="25" step="0.01" value="9.81" aria-label="Gravity magnitude, metres per second squared" />
+						<output data-sim="gravity-mag-out" for="sim-gravity-mag">9.81</output>
+					</div>
+					<span class="sim-presets">
+						<button type="button" class="mat-btn sim-preset-btn" data-gravity-preset="down" title="Preset: Earth gravity, 9.81 m/s² straight down">Down</button>
+						<button type="button" class="mat-btn sim-preset-btn" data-gravity-preset="zero-g" title="Preset: zero gravity — bodies drift">0g</button>
+						<button type="button" class="mat-btn sim-preset-btn" data-gravity-preset="moon" title="Preset: Moon gravity, 1.62 m/s² down">Moon</button>
+					</span>
+					<span class="sim-sep" aria-hidden="true"></span>
+					<div class="sim-field">
+						<label for="sim-time-scale">Speed</label>
+						<input id="sim-time-scale" data-sim="time-scale" type="range" min="0.25" max="2" step="0.05" value="1" aria-label="Time scale, from quarter speed to double speed" />
+						<output data-sim="time-scale-out" for="sim-time-scale">1.00×</output>
+					</div>
 				</div>
 			</header>
 			<nav id="tool-rail" aria-label="Tools">

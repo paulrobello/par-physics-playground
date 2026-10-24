@@ -18,9 +18,10 @@ import {
 	type DocEntity,
 	defaultBody,
 	type LabelEntity,
+	type Material,
 	SceneDocument,
 } from "./document";
-import { MATERIAL_DEFAULT } from "./material";
+import { MATERIAL_DEFAULT_ID } from "./material";
 import {
 	cleanPolygon,
 	completeDecomposition,
@@ -58,10 +59,6 @@ export type DocumentId = string;
 /** Render shape of a registry body (re-exported from the document layer). */
 export type { BodyShape } from "./document";
 
-export interface SpawnBoxOptions {
-	readonly restitution?: number;
-}
-
 /**
  * Spring-drag tuning, per unit of dragged-body mass. Stiffness ω = √k/m = 20
  * rad/s and damping 2·m·ω (critical) — fast follow without oscillation.
@@ -77,6 +74,10 @@ export class PhysicsWorld {
 	readonly bodies = new Map<DocumentId, RAPIER.RigidBody>();
 
 	private groundBody: RAPIER.RigidBody | null = null;
+	/** Notified on every setGravity (the slider sync in sim-controls). */
+	private readonly gravityListeners = new Set<
+		(vector: { x: number; y: number }) => void
+	>();
 	/**
 	 * Invoked for every removed entity (delete, cull, reset, or replacement).
 	 * Consumers holding per-body handles (e.g. the interaction layer's active
@@ -109,6 +110,40 @@ export class PhysicsWorld {
 	}
 
 	/**
+	 * The live gravity vector (m/s², y-down world convention). Returns a COPY:
+	 * a caller mutating the returned object would bypass {@link setGravity}
+	 * and its sleeper wake, leaving gravity changed but bodies still asleep.
+	 */
+	get gravity(): RAPIER.Vector {
+		return { x: this.world.gravity.x, y: this.world.gravity.y };
+	}
+
+	/**
+	 * Apply a new gravity to the LIVE world: the change takes effect on the
+	 * next tick, and every registry body is woken (a sleeping resting box must
+	 * start falling immediately when gravity flips, not at its next wake).
+	 * Notifies gravity listeners (sim-controls syncs its sliders from here).
+	 */
+	setGravity(x: number, y: number): void {
+		this.world.gravity = { x, y };
+		for (const body of this.bodies.values()) body.wakeUp();
+		for (const listener of this.gravityListeners) listener({ x, y });
+	}
+
+	/**
+	 * Subscribe to gravity changes (any setGravity caller, UI or debug API).
+	 * Returns an unsubscribe function, mirroring TimeScale.subscribe.
+	 */
+	subscribeGravity(
+		listener: (vector: { x: number; y: number }) => void,
+	): () => void {
+		this.gravityListeners.add(listener);
+		return () => {
+			this.gravityListeners.delete(listener);
+		};
+	}
+
+	/**
 	 * Create the Rapier simulation state for a document entity and register it.
 	 * Replacing an existing id removes its old body first (spawn-overwrite is
 	 * the P1 debug-API contract).
@@ -133,7 +168,9 @@ export class PhysicsWorld {
 			desc.setTranslation(entity.x, entity.y),
 		);
 		body.setRotation(entity.rot, true);
-		this.attachShape(body, entity.shape);
+		// The entity's materialId is authoritative: density/friction/restitution
+		// all come from the document registry (ink fallback for unknown ids).
+		this.attachShape(body, entity.shape, this.doc.material(entity.materialId));
 		this.doc.add(entity);
 		this.bodies.set(entity.id, body);
 		return body;
@@ -150,6 +187,7 @@ export class PhysicsWorld {
 		id: DocumentId,
 		points: readonly Vec2[],
 		isStatic = false,
+		materialId: string = MATERIAL_DEFAULT_ID,
 	): RAPIER.RigidBody | undefined {
 		const cleaned = cleanPolygon(points);
 		if (
@@ -175,6 +213,7 @@ export class PhysicsWorld {
 				centroid.y,
 			),
 			isStatic,
+			materialId,
 		});
 	}
 
@@ -229,13 +268,18 @@ export class PhysicsWorld {
 		return newId;
 	}
 
-	/** Create every collider a shape needs, with the default material. */
-	private attachShape(body: RAPIER.RigidBody, shape: BodyShape): void {
+	/** Create every collider a shape needs, materialized from `material`. */
+	private attachShape(
+		body: RAPIER.RigidBody,
+		shape: BodyShape,
+		material: Material,
+	): void {
 		if (shape.kind === "polygon") {
 			if (polygonIsConvex(shape.points)) {
 				this.world.createCollider(
 					this.materialize(
 						RAPIER.ColliderDesc.convexHull(flatPoints(shape.points)),
+						material,
 					),
 					body,
 				);
@@ -251,6 +295,7 @@ export class PhysicsWorld {
 							RAPIER.ColliderDesc.convexHull(
 								new Float32Array([pa.x, pa.y, pb.x, pb.y, pc.x, pc.y]),
 							),
+							material,
 						),
 						body,
 					);
@@ -262,16 +307,19 @@ export class PhysicsWorld {
 			shape.kind === "box"
 				? RAPIER.ColliderDesc.cuboid(shape.halfWidth, shape.halfHeight)
 				: RAPIER.ColliderDesc.ball(shape.radius);
-		this.world.createCollider(this.materialize(desc), body);
+		this.world.createCollider(this.materialize(desc, material), body);
 	}
 
-	/** Apply default material to a collider descriptor (null-safe for hulls). */
-	private materialize(desc: RAPIER.ColliderDesc | null): RAPIER.ColliderDesc {
+	/** Apply the entity's material to a collider descriptor (null-safe for hulls). */
+	private materialize(
+		desc: RAPIER.ColliderDesc | null,
+		material: Material,
+	): RAPIER.ColliderDesc {
 		if (!desc) throw new Error("polygon has no valid convex decomposition");
 		return desc
-			.setDensity(MATERIAL_DEFAULT.density)
-			.setFriction(MATERIAL_DEFAULT.friction)
-			.setRestitution(MATERIAL_DEFAULT.restitution);
+			.setDensity(material.density)
+			.setFriction(material.friction)
+			.setRestitution(material.restitution);
 	}
 
 	spawnBox(
@@ -280,14 +328,14 @@ export class PhysicsWorld {
 		y: number,
 		halfWidth: number,
 		halfHeight: number,
-		options: SpawnBoxOptions = {},
+		materialId: string = MATERIAL_DEFAULT_ID,
+		isStatic = false,
 	): RAPIER.RigidBody {
-		const body = this.spawnEntity(
-			defaultBody(id, { kind: "box", halfWidth, halfHeight }, x, y),
-		);
-		if (options.restitution !== undefined)
-			body.collider(0)?.setRestitution(options.restitution);
-		return body;
+		return this.spawnEntity({
+			...defaultBody(id, { kind: "box", halfWidth, halfHeight }, x, y),
+			materialId,
+			isStatic,
+		});
 	}
 
 	spawnCircle(
@@ -296,11 +344,41 @@ export class PhysicsWorld {
 		y: number,
 		radius: number,
 		isStatic = false,
+		materialId: string = MATERIAL_DEFAULT_ID,
 	): RAPIER.RigidBody {
 		return this.spawnEntity({
 			...defaultBody(id, { kind: "circle", radius }, x, y),
+			materialId,
 			isStatic,
 		});
+	}
+
+	/**
+	 * Re-materialize a body with `materialId` (apply-to-selection and the
+	 * delete-fallback repaint in the material panel): the document entity's
+	 * `materialId` updates in place and the EXISTING Rapier body's colliders
+	 * take the new density/friction/restitution, with mass properties
+	 * recomputed. No removal, no respawn: the body keeps its identity, so
+	 * selection, live transform, velocity, and any joints attached to it (P4)
+	 * all survive. False when the id is unknown or not a body. Callers wrap
+	 * the batch in ONE undo action; the entity keeps `materialId` even when it
+	 * no longer resolves (ink fallback). A shape-kind change is out of scope
+	 * for this API — that would be an explicit replacement path.
+	 */
+	setBodyMaterial(id: DocumentId, materialId: string): boolean {
+		const entity = this.doc.get(id);
+		const body = this.bodies.get(id);
+		if (entity?.kind !== "body" || !body) return false;
+		this.doc.setBodyMaterial(id, materialId);
+		const material = this.doc.material(materialId);
+		for (let i = 0; i < body.numColliders(); i++) {
+			const collider = body.collider(i);
+			collider.setDensity(material.density);
+			collider.setFriction(material.friction);
+			collider.setRestitution(material.restitution);
+		}
+		body.recomputeMassPropertiesFromColliders();
+		return true;
 	}
 
 	bodyPosition(id: DocumentId): RAPIER.Vector | undefined {

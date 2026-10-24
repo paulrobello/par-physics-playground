@@ -13,7 +13,10 @@ import {
 	CURSOR_DRAW,
 	createToolEvents,
 } from "./lib/interaction";
-import { attachSimControls } from "./lib/sim-controls";
+import { MATERIAL_DEFAULT_ID } from "./lib/material";
+import { attachMaterialPanel } from "./lib/material-panel";
+import { createMaterialStore } from "./lib/material-store";
+import { attachSimControls, TimeScale } from "./lib/sim-controls";
 import {
 	bodiesInRect,
 	type PickableBody,
@@ -36,6 +39,18 @@ let clock: SimClock | null = null;
 let world: PhysicsWorld | null = null;
 /** Tool state machine; built with the world. */
 let session: ToolSession | null = null;
+/**
+ * The material new draw-tool shapes take (D20): the material panel sets it
+ * once booted; spawns before the panel exists take the palette default.
+ */
+let activeMaterialId = MATERIAL_DEFAULT_ID;
+
+/**
+ * Accumulator feed-rate scale (P3-T3, 0.25×–2×): the rAF delta is multiplied
+ * by it before `advanceRealTime`; created here so the rAF closure, the top-bar
+ * slider, and the debug API share one instance.
+ */
+const timeScale = new TimeScale();
 
 /** Collects a pickable snapshot list for pickBody (pointer events only, not per frame). */
 function listPickableBodies(): PickableBody[] {
@@ -85,6 +100,7 @@ const sceneView = {
 			y: number,
 			rot: number,
 			isStatic: boolean,
+			color: string,
 		) => void,
 	): void {
 		const w = world;
@@ -99,6 +115,7 @@ const sceneView = {
 				body.translation().y,
 				body.rotation(),
 				entity.isStatic,
+				w.doc.material(entity.materialId).color,
 			);
 		}
 	},
@@ -130,7 +147,10 @@ const renderer = createRenderer(canvas, {
 	camera,
 	scene: sceneView,
 	onFrame: (dtSeconds) => {
-		clock?.advanceRealTime(dtSeconds);
+		// Time-scale (P3-T3) scales the accumulator FEED RATE only: the fixed
+		// 60Hz tick is unchanged, and the debug advanceTime path (which steps
+		// ticks directly) never sees the scale — determinism guard, pinned in e2e.
+		clock?.advanceRealTime(dtSeconds * timeScale.value);
 	},
 });
 attachCameraControls(
@@ -187,6 +207,8 @@ void (async () => {
 			if (session?.hoverId === id) session.hoverId = undefined;
 		},
 		isStaticSpawn: () => session?.staticMode ?? false,
+		// Active material for new shapes (D20): the panel sets it; read per spawn.
+		activeMaterialId: () => activeMaterialId,
 		recordAction: () => undoStack.commit(),
 		beginAction: () => undoStack.beginAction(),
 		cancelAction: () => undoStack.cancelAction(),
@@ -210,6 +232,8 @@ void (async () => {
 	attachSimControls({
 		topBar,
 		clock: simClock,
+		world: w,
+		timeScale,
 		isEditingText: () => session?.isEditingText() ?? false,
 		// Cancel any active drag first so its mouse joint is removed before the
 		// registry teardown drops the body it references.
@@ -222,8 +246,38 @@ void (async () => {
 		},
 	});
 	if (debugEnabled) {
-		installDebugApi(simClock, w, camera, session, undoStack);
+		installDebugApi(
+			simClock,
+			w,
+			camera,
+			session,
+			undoStack,
+			() => activeMaterialId,
+			timeScale,
+		);
 		console.info("[par-physics] debug mode enabled");
 	}
+	// Custom-material library (P3-T2): load persisted customs (IndexedDB,
+	// schema-versioned store), merge into the registry, then attach the panel.
+	// A load failure degrades to the palette-only library, not a dead app.
+	const store = createMaterialStore();
+	try {
+		for (const material of await store.load()) w.doc.addMaterial(material);
+	} catch (err) {
+		console.warn("[par-physics] custom materials failed to load", err);
+	}
+	const contextPanel = document.querySelector<HTMLElement>("#context-panel");
+	if (!contextPanel) throw new Error("#context-panel missing from index.html");
+	attachMaterialPanel({
+		panel: contextPanel,
+		doc: w.doc,
+		world: w,
+		session,
+		undo: undoStack,
+		store,
+		onActiveChange: (id) => {
+			activeMaterialId = id;
+		},
+	});
 	clock = simClock;
 })();

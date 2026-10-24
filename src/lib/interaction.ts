@@ -14,6 +14,7 @@
  */
 import type { Camera } from "./camera";
 import { defaultBody } from "./document";
+import { MATERIAL_DEFAULT_ID } from "./material";
 import {
 	beamFromSegment,
 	classifyEditKey,
@@ -52,6 +53,11 @@ export interface ToolEventsDeps {
 	 */
 	isStaticSpawn?: () => boolean;
 	/**
+	 * The material id new draw-tool spawns take — the material panel's active
+	 * material (P3-T2, PRD D20). Read per spawn; defaults to ink.
+	 */
+	activeMaterialId?: () => string;
+	/**
 	 * A mutation boundary completed: snapshot for undo (shape commit, delete,
 	 * duplicate, label commit, move-end, rotate-end). Called after applying.
 	 */
@@ -78,6 +84,8 @@ export function createToolEvents(
 	const selectedIds = deps?.selectedIds ?? (() => new Set<string>());
 	const pruneSelection = deps?.pruneSelection ?? (() => {});
 	const isStaticSpawn = deps?.isStaticSpawn ?? (() => false);
+	const activeMaterialId =
+		deps?.activeMaterialId ?? (() => MATERIAL_DEFAULT_ID);
 	const recordAction = deps?.recordAction ?? (() => {});
 	const beginAction = deps?.beginAction ?? (() => {});
 	const events: ToolSessionEvents & {
@@ -119,18 +127,33 @@ export function createToolEvents(
 					cy,
 				),
 				isStatic: isStaticSpawn(),
+				materialId: activeMaterialId(),
 			});
 			recordAction();
 		},
 		onSpawnCircle({ cx, cy, radius }) {
 			beginAction();
-			world.spawnCircle(freshBodyId(), cx, cy, radius, isStaticSpawn());
+			world.spawnCircle(
+				freshBodyId(),
+				cx,
+				cy,
+				radius,
+				isStaticSpawn(),
+				activeMaterialId(),
+			);
 			recordAction();
 		},
 		onSpawnPolygon(points) {
 			// Degenerate input (zero area) is dropped by the world: no body.
 			beginAction();
-			if (world.spawnPolygon(freshBodyId(), points, isStaticSpawn()))
+			if (
+				world.spawnPolygon(
+					freshBodyId(),
+					points,
+					isStaticSpawn(),
+					activeMaterialId(),
+				)
+			)
 				recordAction();
 			else deps?.cancelAction?.();
 		},
@@ -146,6 +169,7 @@ export function createToolEvents(
 					rot,
 				),
 				isStatic: isStaticSpawn(),
+				materialId: activeMaterialId(),
 			});
 			recordAction();
 		},
@@ -157,6 +181,7 @@ export function createToolEvents(
 			// Static mode applies to every decision, so a freehand-drawn ramp
 			// paints terrain just like the polygon tool.
 			const isStatic = isStaticSpawn();
+			const materialId = activeMaterialId();
 			switch (result.kind) {
 				case "circle":
 					world.spawnCircle(
@@ -165,6 +190,7 @@ export function createToolEvents(
 						result.cy,
 						result.radius,
 						isStatic,
+						materialId,
 					);
 					break;
 				case "rect":
@@ -181,10 +207,18 @@ export function createToolEvents(
 							result.rot,
 						),
 						isStatic,
+						materialId,
 					});
 					break;
 				case "polygon":
-					if (!world.spawnPolygon(freshBodyId(), result.points, isStatic)) {
+					if (
+						!world.spawnPolygon(
+							freshBodyId(),
+							result.points,
+							isStatic,
+							materialId,
+						)
+					) {
 						deps?.cancelAction?.();
 						return;
 					}
@@ -207,6 +241,7 @@ export function createToolEvents(
 								beam.rot,
 							),
 							isStatic,
+							materialId,
 						});
 					}
 					break;

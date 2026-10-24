@@ -1,0 +1,168 @@
+{
+	"schemaVersion": 2,
+	"generatedAt": "2026-10-24T00:00:00Z",
+	"title": "Design System: Par Physics Playground",
+	"extensions": {
+		"colorMeta": {
+			"canvas": {
+				"role": "neutral",
+				"displayName": "Stage Void",
+				"canonical": "#111418"
+			},
+			"surface": {
+				"role": "neutral",
+				"displayName": "Panel Graphite",
+				"canonical": "#1b2028"
+			},
+			"surface-raised": {
+				"role": "neutral",
+				"displayName": "Raised Slate",
+				"canonical": "#232b36"
+			},
+			"accent-fill": {
+				"role": "primary",
+				"displayName": "Slider Track Fill (accent at 70% alpha)",
+				"canonical": "rgba(74, 163, 255, 0.7)"
+			},
+			"border": {
+				"role": "neutral",
+				"displayName": "Zero Seam",
+				"canonical": "#2a323d"
+			},
+			"border-strong": {
+				"role": "neutral",
+				"displayName": "Seam Highlight",
+				"canonical": "#3b475a"
+			},
+			"text": {
+				"role": "neutral",
+				"displayName": "Instrument Text",
+				"canonical": "#e6e9ee"
+			},
+			"text-secondary": {
+				"role": "neutral",
+				"displayName": "Secondary Text",
+				"canonical": "#9aa4b5"
+			},
+			"text-tertiary": {
+				"role": "neutral",
+				"displayName": "Tertiary Text (disabled chrome only)",
+				"canonical": "#6f7a8c"
+			},
+			"accent": {
+				"role": "primary",
+				"displayName": "Electric Instrument Blue",
+				"canonical": "#4aa3ff"
+			},
+			"accent-hover": {
+				"role": "primary",
+				"displayName": "Accent Hover",
+				"canonical": "#6db6ff"
+			},
+			"accent-dim": {
+				"role": "primary",
+				"displayName": "Accent Tint 12%",
+				"canonical": "rgba(74, 163, 255, 0.12)"
+			},
+			"danger": {
+				"role": "neutral",
+				"displayName": "Danger Red (reserved graphic hue)",
+				"canonical": "#f44336"
+			},
+			"danger-text": {
+				"role": "neutral",
+				"displayName": "Danger Text (AA-safe error text)",
+				"canonical": "#ff6b60"
+			},
+			"text-placeholder": {
+				"role": "neutral",
+				"displayName": "Placeholder Text",
+				"canonical": "#8b96a5"
+			}
+		},
+		"typographyMeta": {
+			"title": {
+				"displayName": "Title",
+				"purpose": "Top-bar product name only."
+			},
+			"label": {
+				"displayName": "Panel heading",
+				"purpose": "Uppercase micro-headers in the context panel."
+			},
+			"body": {
+				"displayName": "Body",
+				"purpose": "Panel rows and control labels."
+			},
+			"numeric": {
+				"displayName": "Numeric",
+				"purpose": "Tabular-numeral readouts."
+			}
+		},
+		"shadows": [
+			{
+				"name": "lift",
+				"value": "0 2px 8px rgba(0, 0, 0, 0.35)",
+				"purpose": "Hover raise on interactive chrome and the material editor card."
+			},
+			{
+				"name": "glow-accent",
+				"value": "0 0 0 1px #4aa3ff, 0 0 10px rgba(74, 163, 255, 0.28)",
+				"purpose": "Selection and armed state; 1px crisp ring plus soft bloom."
+			}
+		],
+		"motion": [
+			{
+				"name": "ease-instrument",
+				"value": "cubic-bezier(0.2, 0, 0.2, 1)",
+				"purpose": "All state transitions, 140ms."
+			}
+		],
+		"breakpoints": [{ "name": "min", "value": "1100px" }]
+	},
+	"components": [],
+	"narrative": {
+		"northStar": "Precision Instrument",
+		"overview": "The HUD is the chassis of a measurement device: matte dark surfaces hold the tools, a single electric-blue accent marks every live or armed state, and the canvas stays the brightest, clearest thing on screen. Chrome recedes; state speaks. Depth is earned by interaction, never decoration at rest.",
+		"keyCharacteristics": [
+			"Flat-until-touched: chrome has no shadows or lifts at rest.",
+			"One accent owns selection, armed tools, and live values.",
+			"Canvas center is sacred.",
+			"Tabular numerals in every readout."
+		],
+		"rules": [
+			{
+				"name": "The One Voice Rule",
+				"body": "Blue is used for state, never for decoration. If a blue pixel does not tell the user what is selected, armed, or focused, it is in the wrong place.",
+				"section": "colors"
+			},
+			{
+				"name": "The Tabular Numerals Rule",
+				"body": "Every live number renders with font-variant-numeric: tabular-nums. Readouts must never wiggle.",
+				"section": "typography"
+			},
+			{
+				"name": "The Flat-Until-Touched Rule",
+				"body": "A surface at rest carries no shadow. Shadows appear only as a response to hover, press, open, or selection, and never on the canvas.",
+				"section": "elevation"
+			},
+			{
+				"name": "The Canvas Stays Clear Rule",
+				"body": "No chrome casts onto the stage. The canvas is the brightest, calmest surface; the HUD frames it.",
+				"section": "elevation"
+			}
+		],
+		"dos": [
+			"Do keep every surface flat at rest; express state with the two-shadow vocabulary (lift, accent glow) and nothing else.",
+			"Do render all live numbers with tabular numerals.",
+			"Do theme the browser chrome the design forgets: ::selection, caret, focus-visible rings, and panel scrollbars in the instrument palette.",
+			"Do keep icons a single family: drawn SVG, 1.5px stroke, 18px box."
+		],
+		"donts": [
+			"Don't use cream/off-white surfaces, italic accent type, pill buttons, section numbers, or oversized display type.",
+			"Don't put shadows, gradients, or accent tints on or over the canvas.",
+			"Don't introduce a second saturated hue; danger red is reserved for error text.",
+			"Don't let a readout reflow while its value ticks.",
+			"Don't create depth with zero-offset colored halos; shadows carry offset and blur."
+		]
+	}
+}

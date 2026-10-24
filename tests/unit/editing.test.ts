@@ -40,7 +40,7 @@ describe("SceneDocument", () => {
 		const b = doc.get("b");
 		if (b?.kind !== "body") throw new Error("body b missing");
 		expect(b.shape.kind).toBe("circle");
-		expect(b.materialId).toBe("default");
+		expect(b.materialId).toBe("ink");
 		expect(b.isStatic).toBe(false);
 		expect(doc.setTransform("b", 7, 8, Math.PI / 2)).toBe(true);
 		expect(doc.get("b")?.x).toBe(7);

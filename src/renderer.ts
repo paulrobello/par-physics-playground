@@ -9,7 +9,6 @@
  */
 
 import type { Camera } from "./lib/camera";
-import { MATERIAL_DEFAULT } from "./lib/material";
 import {
 	type DrawPreview,
 	effectiveLabelFontSize,
@@ -27,6 +26,8 @@ export interface SceneView {
 			y: number,
 			rot: number,
 			isStatic: boolean,
+			/** Resolved material fill color (ink fallback, dynamic bodies only). */
+			color: string,
 		) => void,
 	): void;
 	/** Non-physical labels, in document order (drawn above bodies). */
@@ -230,7 +231,7 @@ export function createRenderer(
 		const lift = HOVER_LIFT_PX / zoom;
 		ctx.shadowBlur = BODY_SHADOW_BLUR_PX;
 		ctx.shadowOffsetY = BODY_SHADOW_OFFSET_Y_PX;
-		scene.forEachBody((id, shape, x, y, rot, isStatic) => {
+		scene.forEachBody((id, shape, x, y, rot, isStatic, color) => {
 			const hovered = id === hoverId;
 			ctx.save();
 			ctx.translate(x, hovered && !isStatic ? y - lift : y);
@@ -254,7 +255,7 @@ export function createRenderer(
 				ctx.rotate(rot);
 				ctx.beginPath();
 				traceShapePath(ctx, shape);
-				ctx.fillStyle = MATERIAL_DEFAULT.color;
+				ctx.fillStyle = color;
 				ctx.fill();
 			}
 			ctx.restore();

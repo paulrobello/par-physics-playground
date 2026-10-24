@@ -178,6 +178,7 @@ test("undo/redo restores draws, deletes, and stays bounded", async ({
 		if (!more) break;
 		redoCount++;
 	}
+	expect(redoCount).toBe(49);
 	const full = await page.evaluate(() => {
 		const ppg = window.__ppg;
 		if (!ppg) throw new Error("debug api missing");

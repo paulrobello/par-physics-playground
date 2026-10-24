@@ -19,9 +19,11 @@
 		"tests",
 		"scripts",
 		"e2e",
+		"e2e-visual",
 		"perf",
 		"vite.config.ts",
 		"playwright.config.ts",
-		"playwright.perf.config.ts"
+		"playwright.perf.config.ts",
+		"playwright.visual.config.ts"
 	]
 }

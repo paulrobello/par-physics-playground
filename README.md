@@ -23,6 +23,13 @@ Browser smoke tests run locally only (never in CI, per PRD D14). One-time prereq
 bunx playwright test   # boots its own dev server on port 8114
 ```
 
+Visual-regression baselines for the HUD chrome (top bar, tool rail, context panel) also run locally only, in their own Playwright project on port 8116 (`DESIGN.md` is the contract they guard):
+
+```sh
+make visual           # compare against e2e-visual/__screenshots__/ baselines
+make visual-update    # re-capture baselines after an intentional design change
+```
+
 CI (GitHub Actions) runs typecheck + lint + unit tests on every push and pull request. The repository has no remote yet, so first-push CI verification is still pending.
 
 Deployment target: https://physics.pardev.net
