@@ -24,7 +24,7 @@ export class SimClock {
 
 	private accumulatorSeconds = 0;
 	private tickCount = 0;
-	private droppedSeconds = 0;
+	private droppedSecondsTotal = 0;
 	private paused = false;
 	private readonly listeners = new Set<TickListener>();
 
@@ -44,6 +44,15 @@ export class SimClock {
 
 	get tick(): number {
 		return this.tickCount;
+	}
+
+	/**
+	 * Sim time dropped by the catch-up limit so far (seconds): the fixed-step
+	 * clock discards excess backlog instead of death-spiraling — surfaced for
+	 * the debug telemetry (`__ppg.simTelemetry()`).
+	 */
+	get droppedSeconds(): number {
+		return this.droppedSecondsTotal;
 	}
 
 	/** Fraction of the next tick already accumulated; supports render interpolation. */
@@ -113,7 +122,7 @@ export class SimClock {
 			);
 			if (excess > 0) {
 				this.accumulatorSeconds -= excess * this.fixedDtSeconds;
-				this.droppedSeconds += excess * this.fixedDtSeconds;
+				this.droppedSecondsTotal += excess * this.fixedDtSeconds;
 			}
 		}
 	}

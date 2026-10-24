@@ -72,6 +72,13 @@ describe("SimClock", () => {
 		expect(clock.tick).toBe(6);
 	});
 
+	test("droppedSeconds telemetry counts the discarded backlog", () => {
+		const clock = new SimClock({ maxCatchUpSteps: 5 });
+		expect(clock.droppedSeconds).toBe(0);
+		clock.advanceRealTime(1); // 55 of 60 ticks dropped = 55/60 s
+		expect(clock.droppedSeconds).toBeCloseTo(55 / 60, 5);
+	});
+
 	test("interpolationAlpha is the carried fraction of the next tick", () => {
 		const clock = new SimClock();
 		clock.advanceRealTime(8 / 1000); // half a 16.67ms tick

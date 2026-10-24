@@ -191,6 +191,14 @@ export interface DebugApi {
 		| undefined;
 	/** Current tick count (advanceTime determinism check). */
 	tick(): number;
+	/** Live sim telemetry: tick, dropped sim seconds, body/joint counts. */
+	simTelemetry(): {
+		tick: number;
+		droppedSeconds: number;
+		bodies: number;
+		joints: number;
+		timeScale: number;
+	};
 	/** The whole document as plain entities (scene round-trip compares). */
 	documentAll(): DocEntity[];
 	/** Registered materials, predefined and custom. */
@@ -425,6 +433,15 @@ export function installDebugApi(
 		},
 		tick() {
 			return clock.tick;
+		},
+		simTelemetry() {
+			return {
+				tick: clock.tick,
+				droppedSeconds: clock.droppedSeconds,
+				bodies: world.bodies.size,
+				joints: world.doc.joints().length,
+				timeScale: timeScale.value,
+			};
 		},
 		documentAll() {
 			return world.doc.all().map((e) => structuredClone(e));

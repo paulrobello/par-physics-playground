@@ -250,6 +250,16 @@ function fit(): void {
 const observer = new ResizeObserver(fit);
 observer.observe(canvas);
 fit();
+// A monitor move (or browser zoom) changes devicePixelRatio without a size
+// event — re-fit so the backing store stays sharp across monitors.
+let dprQuery = matchMedia(`(resolution: ${window.devicePixelRatio}dppx)`);
+dprQuery.addEventListener("change", function refitOnDprChange() {
+	const current = window.devicePixelRatio;
+	dprQuery.removeEventListener("change", refitOnDprChange);
+	dprQuery = matchMedia(`(resolution: ${current}dppx)`);
+	dprQuery.addEventListener("change", refitOnDprChange);
+	fit();
+});
 
 /** Ground line rests this far above the bottom edge in the default view (CSS px). */
 const GROUND_SCREEN_MARGIN_PX = 80;

@@ -7,7 +7,7 @@ test:
 	bun run test
 
 fmt:
-	bunx biome format --write src tests scripts *.ts
+	bunx biome format --write .
 
 lint:
 	bun run lint
