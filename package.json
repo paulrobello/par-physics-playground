@@ -18,5 +18,8 @@
 		"@types/bun": "1.4.3",
 		"typescript": "7.0.2",
 		"vite": "8.3.5"
+	},
+	"dependencies": {
+		"@dimforge/rapier2d-compat": "0.21.0"
 	}
 }

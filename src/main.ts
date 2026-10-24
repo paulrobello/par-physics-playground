@@ -1,8 +1,21 @@
 /**
- * App entry point: boots the Canvas2D renderer into the D15 HUD skeleton.
+ * App entry point: boots the Canvas2D renderer, the Rapier world, and the
+ * fixed-step clock that advances it from the rAF frame flow.
  */
 import "./style.css";
 import { debugEnabled } from "./debug";
+import { Camera } from "./lib/camera";
+import { attachCameraControls } from "./lib/camera-controls";
+import { SimClock } from "./lib/clock";
+import { installDebugApi } from "./lib/debug-api";
+import {
+	attachToolControls,
+	CURSOR_DRAW,
+	createToolEvents,
+} from "./lib/interaction";
+import { attachSimControls } from "./lib/sim-controls";
+import { type PickableBody, pickBody, ToolSession } from "./lib/tools";
+import { type BodyShape, PhysicsWorld } from "./lib/world";
 import { createRenderer } from "./renderer";
 
 const stage = document.querySelector<HTMLCanvasElement>("#stage");
@@ -10,7 +23,79 @@ if (!stage) throw new Error("#stage canvas missing from index.html");
 // tsgo does not carry const narrowing into closures; alias with an explicit type.
 const canvas: HTMLCanvasElement = stage;
 
-const renderer = createRenderer(canvas);
+/** Debug mode freezes the real-time feed; `advanceTime` drives the sim deterministically. */
+let clock: SimClock | null = null;
+/** Live physics world, built asynchronously at boot. */
+let world: PhysicsWorld | null = null;
+/** Tool state machine; built with the world. */
+let session: ToolSession | null = null;
+
+/** Collects a pickable snapshot list for pickBody (pointer events only, not per frame). */
+function listPickableBodies(): PickableBody[] {
+	const w = world;
+	if (!w) return [];
+	const list: PickableBody[] = [];
+	for (const [id, body] of w.bodies) {
+		const shape = w.shapeOf(id);
+		if (!shape) continue;
+		list.push({
+			id,
+			shape,
+			x: body.translation().x,
+			y: body.translation().y,
+			rot: body.rotation(),
+		});
+	}
+	return list;
+}
+
+const sceneView = {
+	forEachBody(
+		fn: (
+			id: string,
+			shape: BodyShape,
+			x: number,
+			y: number,
+			rot: number,
+		) => void,
+	): void {
+		const w = world;
+		if (!w) return;
+		for (const [id, body] of w.bodies) {
+			const shape = w.shapeOf(id);
+			if (shape)
+				fn(
+					id,
+					shape,
+					body.translation().x,
+					body.translation().y,
+					body.rotation(),
+				);
+		}
+	},
+	preview() {
+		return session?.preview() ?? null;
+	},
+	hoverId() {
+		return session?.hoverId;
+	},
+	selectedId() {
+		return session?.selectedId;
+	},
+};
+
+const camera = new Camera();
+
+const renderer = createRenderer(canvas, {
+	camera,
+	scene: sceneView,
+	onFrame: (dtSeconds) => {
+		clock?.advanceRealTime(dtSeconds);
+	},
+});
+attachCameraControls(canvas, camera, () =>
+	session?.tool === "select" ? "" : CURSOR_DRAW,
+);
 
 function fit(): void {
 	const rect = canvas.getBoundingClientRect();
@@ -20,8 +105,45 @@ function fit(): void {
 const observer = new ResizeObserver(fit);
 observer.observe(canvas);
 fit();
+
+/** Ground line rests this far above the bottom edge in the default view (CSS px). */
+const GROUND_SCREEN_MARGIN_PX = 80;
+const bootRect = canvas.getBoundingClientRect();
+camera.offsetX = 0;
+camera.offsetY = bootRect.height - GROUND_SCREEN_MARGIN_PX;
+
 renderer.start();
 
-if (debugEnabled) {
-	console.info("[par-physics] debug mode enabled");
-}
+void (async () => {
+	const simClock = new SimClock();
+	const w = await PhysicsWorld.create();
+	simClock.subscribe(() => w.step());
+	world = w;
+	const events = createToolEvents(w);
+	session = new ToolSession(events, (wx, wy) =>
+		pickBody(listPickableBodies(), wx, wy),
+	);
+	const toolbar = document.querySelector<HTMLElement>("#tool-rail");
+	if (!toolbar) throw new Error("#tool-rail missing from index.html");
+	attachToolControls({ toolbar, canvas, camera, session });
+	// Debug mode must pause the clock BEFORE the sim controls attach, so the
+	// pause button's initial aria state reflects the paused clock.
+	if (debugEnabled) simClock.setPaused(true);
+	const topBar = document.querySelector<HTMLElement>("#top-bar");
+	if (!topBar) throw new Error("#top-bar missing from index.html");
+	attachSimControls({
+		topBar,
+		clock: simClock,
+		// Cancel any active drag first so its mouse joint is removed before the
+		// registry teardown drops the body it references.
+		onReset: () => {
+			session?.cancel();
+			w.reset();
+		},
+	});
+	if (debugEnabled) {
+		installDebugApi(simClock, w, camera);
+		console.info("[par-physics] debug mode enabled");
+	}
+	clock = simClock;
+})();

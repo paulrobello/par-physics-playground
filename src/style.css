@@ -10,6 +10,7 @@
 	--panel-border: #2a323d;
 	--hud-text: #e6e9ee;
 	--hud-text-secondary: #98a2b3;
+	--accent: #4aa3ff;
 }
 
 * {
@@ -56,10 +57,51 @@ body {
 	font-weight: 600;
 }
 
+.sim-controls {
+	margin-left: auto;
+	display: flex;
+	align-items: center;
+	gap: 6px;
+}
+
 #tool-rail {
 	grid-area: tool-rail;
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	gap: 6px;
+	padding-top: 8px;
 	background: var(--panel-bg);
 	border-right: 1px solid var(--panel-border);
+}
+
+.tool-btn {
+	width: 36px;
+	height: 36px;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	padding: 0;
+	background: transparent;
+	border: 1px solid transparent;
+	border-radius: 6px;
+	color: var(--hud-text-secondary);
+	cursor: pointer;
+}
+
+.tool-btn:hover {
+	color: var(--hud-text);
+	border-color: var(--panel-border);
+}
+
+.tool-btn.active {
+	color: var(--accent);
+	border-color: var(--accent);
+}
+
+.tool-btn svg {
+	width: 18px;
+	height: 18px;
 }
 
 #stage-area {

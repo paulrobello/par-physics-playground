@@ -10,8 +10,29 @@
 		<div id="app">
 			<header id="top-bar">
 				<h1>Par Physics Playground</h1>
+				<div class="sim-controls" role="toolbar" aria-label="Simulation controls">
+					<button type="button" class="tool-btn" data-sim="pause" aria-label="Pause simulation (P)" aria-pressed="false" title="Pause (P)">
+						<svg viewBox="0 0 16 16" aria-hidden="true"><rect x="4" y="3" width="3" height="10" rx="1" fill="currentColor"/><rect x="9" y="3" width="3" height="10" rx="1" fill="currentColor"/></svg>
+					</button>
+					<button type="button" class="tool-btn" data-sim="step" aria-label="Step one tick (.)" title="Step one tick (.)">
+						<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 3l7 5-7 5z" fill="currentColor"/><rect x="11" y="3" width="2.5" height="10" rx="1" fill="currentColor"/></svg>
+					</button>
+					<button type="button" class="tool-btn" data-sim="reset" aria-label="Reset world" title="Reset world">
+						<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 3a5 5 0 1 1-4.9 6h1.55A3.5 3.5 0 1 0 8 4.5V6L4.5 3.5 8 1z" fill="currentColor"/></svg>
+					</button>
+				</div>
 			</header>
-			<nav id="tool-rail" aria-label="Tools"></nav>
+			<nav id="tool-rail" aria-label="Tools">
+				<button type="button" class="tool-btn" data-tool="select" aria-label="Select tool (V)" aria-pressed="true" title="Select (V)">
+					<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 2l9 6-4 1-2 4z" fill="currentColor"/></svg>
+				</button>
+				<button type="button" class="tool-btn" data-tool="box" aria-label="Box tool (B)" aria-pressed="false" title="Box (B)">
+					<svg viewBox="0 0 16 16" aria-hidden="true"><rect x="3" y="3" width="10" height="10" rx="1" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>
+				</button>
+				<button type="button" class="tool-btn" data-tool="circle" aria-label="Circle tool (C)" aria-pressed="false" title="Circle (C)">
+					<svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="5" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>
+				</button>
+			</nav>
 			<main id="stage-area">
 				<canvas id="stage"></canvas>
 			</main>

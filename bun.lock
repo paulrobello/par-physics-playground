@@ -4,6 +4,9 @@
   "workspaces": {
     "": {
       "name": "par-physics-playground",
+      "dependencies": {
+        "@dimforge/rapier2d-compat": "0.21.0",
+      },
       "devDependencies": {
         "@biomejs/biome": "2.6.2",
         "@playwright/test": "1.64.1",
@@ -35,6 +38,8 @@
     "@biomejs/cli-win32-arm64": ["@biomejs/cli-win32-arm64@2.6.2", "", { "os": "win32", "cpu": "arm64" }, "sha512-/PEOo6evlgrQOfKhMNtC/4Gk8ai3hySXXEtjUzCqZe/4iAbMdqelpp7qvZEDyLxlZS+BjOMQFpq2gXI/BPaAqw=="],
 
     "@biomejs/cli-win32-x64": ["@biomejs/cli-win32-x64@2.6.2", "", { "os": "win32", "cpu": "x64" }, "sha512-FVlWD+mDDz8nN5LWKRWUhhb7wKIK0VE3oXQvQBX7Fwwj00CvqMVhMyiz1iz8O5aZGmnkhFlKSwJPrUvMh5prQw=="],
+
+    "@dimforge/rapier2d-compat": ["@dimforge/rapier2d-compat@0.21.0", "", {}, "sha512-cMStLQZbY5D/ajAPjOwTwoYuAJAungTYB45MNFEa5B+LGaMiZfxLwjHsfpxH5B0sDa+gkmcQFJJKiHNKnlpMnA=="],
 
     "@oxc-project/types": ["@oxc-project/types@0.155.0", "", {}, "sha512-SeE8JPwW1xs1tHeNycjUtUBdhorRa8o4jlvjwk49R7/Z291i+4DQa7JJIgOm/TaYQZx+QrPQbVJ/9c8dMIZN8Q=="],
 
