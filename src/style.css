@@ -626,6 +626,45 @@ input[type="range"]:hover::-moz-range-thumb {
 	transform: translateY(-1px);
 }
 
+/* Assemblies panel (reusable assemblies): the material panel's list
+   vocabulary (.mat-row/.mat-btn) with the scenes-menu's input+save row. */
+.assembly-panel {
+	padding: 8px 0 0;
+	border-top: 1px solid var(--panel-border);
+	margin-top: 8px;
+}
+
+.assembly-panel h2 {
+	margin: 0 0 6px;
+	font-size: 11px;
+	font-weight: 500;
+	letter-spacing: 0.06em;
+	text-transform: uppercase;
+	color: var(--hud-text-secondary);
+}
+
+.asm-save {
+	display: flex;
+	gap: 6px;
+}
+
+.asm-save input {
+	flex: 1;
+	min-width: 0;
+	padding: 5px 8px;
+	font: inherit;
+	font-size: 12px;
+	color: var(--hud-text);
+	background: var(--canvas-bg);
+	border: 1px solid var(--panel-border);
+	border-radius: 6px;
+	caret-color: var(--accent);
+}
+
+.asm-save .mat-btn {
+	flex: none;
+}
+
 /* Transient notice toast (P4-T4 D17 visible rejection; see src/lib/notice.ts). */
 #ppg-notice {
 	position: fixed;

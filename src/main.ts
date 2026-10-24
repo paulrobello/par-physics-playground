@@ -4,6 +4,9 @@
  */
 import "./style.css";
 import { debugEnabled } from "./debug";
+import type { Assembly } from "./lib/assembly";
+import { attachAssemblyPanel } from "./lib/assembly-panel";
+import { createAssemblyStore } from "./lib/assembly-store";
 import { Camera } from "./lib/camera";
 import { attachCameraControls } from "./lib/camera-controls";
 import { SimClock } from "./lib/clock";
@@ -434,6 +437,16 @@ void (async () => {
 	} catch (err) {
 		console.warn("[par-physics] custom materials failed to load", err);
 	}
+	// Reusable assemblies: load the persisted library before the panels attach
+	// (the material-library boot pattern); a load failure degrades to an empty
+	// session-only library, not a dead app.
+	const assemblyStore = createAssemblyStore();
+	let savedAssemblies: Assembly[] = [];
+	try {
+		savedAssemblies = await assemblyStore.load();
+	} catch (err) {
+		console.warn("[par-physics] assemblies failed to load", err);
+	}
 	const contextPanel = document.querySelector<HTMLElement>("#context-panel");
 	if (!contextPanel) throw new Error("#context-panel missing from index.html");
 	attachMaterialPanel({
@@ -454,6 +467,18 @@ void (async () => {
 		world: w,
 		session,
 		undo: undoStack,
+	});
+	// Assemblies section appends to the same context panel (the joint-panel
+	// append pattern; neither clobbers the other).
+	attachAssemblyPanel({
+		host: contextPanel,
+		world: w,
+		session,
+		undo: undoStack,
+		store: assemblyStore,
+		canvas,
+		camera,
+		initial: savedAssemblies,
 	});
 	clock = simClock;
 })();
