@@ -29,8 +29,13 @@ export const ROPE_SEGMENT_RADIUS = 0.6;
 export const ROPE_LINK_SLACK = 1.2;
 /** Max segments one drawn chain may have (≈126 world units of rope). */
 export const ROPE_MAX_SEGMENTS_PER_CHAIN = 64;
-/** Max rope segment bodies in the whole scene. */
-export const ROPE_MAX_TOTAL_SEGMENTS = 192;
+/**
+ * Max rope segment bodies in the whole scene. Provisional D17 guard, raised
+ * from 192 to 384 for the PRD G7 scale target: the P5-T3 1000-body stress
+ * workload is rope-heavy (300+ beads) by mandate — the guard bounds abuse,
+ * not the perf target.
+ */
+export const ROPE_MAX_TOTAL_SEGMENTS = 384;
 
 /** Rope segment body ids carry this prefix (the total-cap bookkeeping key). */
 const ROPE_SEGMENT_ID_PREFIX = "rope-seg-";

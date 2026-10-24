@@ -261,44 +261,168 @@ export function createRenderer(
 	 * slate fill, ground-line stroke, no drop shadow or hover lift (static
 	 * geometry does not fall, so it does not hover-lift). `zoom` converts
 	 * screen-constant widths to world units.
+	 *
+	 * PRD R2: the shadow/fill pair is rasterized ONCE per body into an
+	 * offscreen sprite (Canvas2D shadowBlur is a per-fill raster cost that
+	 * measured 14 fps at 200 bodies when paid every frame) and blitted per
+	 * frame; only the hovered body takes the live glow path, and the
+	 * selection outline stays a live stroke. Sprites re-rasterize when their
+	 * shape reference, material color, staticness, or dpr changes, or when
+	 * zoom drifts past SPRITE_ZOOM_DRIFT from the rasterization zoom (blit
+	 * scaling within the drift window is imperceptible for soft shadows).
 	 */
+	interface BodySprite {
+		canvas: HTMLCanvasElement;
+		/** Half-extents of the SPRITE (body + margin) in world units. */
+		halfW: number;
+		halfH: number;
+		zoom: number;
+		dpr: number;
+		color: string;
+		isStatic: boolean;
+		shape: BodyShape;
+	}
+	const bodySprites = new Map<string, BodySprite>();
+	const SPRITE_ZOOM_DRIFT = 0.3;
+	const SPRITE_MARGIN_PX =
+		BODY_SHADOW_BLUR_PX + Math.abs(BODY_SHADOW_OFFSET_Y_PX) + 4;
+
+	/** World-space half-extents of a shape (sprite bounds exclude margin). */
+	function shapeHalfExtents(shape: BodyShape): { hw: number; hh: number } {
+		if (shape.kind === "box") {
+			return { hw: shape.halfWidth, hh: shape.halfHeight };
+		}
+		if (shape.kind === "circle") {
+			return { hw: shape.radius, hh: shape.radius };
+		}
+		let maxX = 0;
+		let maxY = 0;
+		for (const p of shape.points) {
+			maxX = Math.max(maxX, Math.abs(p.x));
+			maxY = Math.max(maxY, Math.abs(p.y));
+		}
+		return { hw: maxX, hh: maxY };
+	}
+
+	function rasterizeBodySprite(
+		shape: BodyShape,
+		color: string,
+		isStatic: boolean,
+		zoom: number,
+		dpr: number,
+	): BodySprite {
+		const { hw, hh } = shapeHalfExtents(shape);
+		const marginW = SPRITE_MARGIN_PX / zoom;
+		const sprite = document.createElement("canvas");
+		const cssW = (hw + marginW) * 2 * zoom;
+		const cssH = (hh + marginW) * 2 * zoom;
+		sprite.width = Math.max(1, Math.ceil(cssW * dpr));
+		sprite.height = Math.max(1, Math.ceil(cssH * dpr));
+		const sctx = sprite.getContext("2d");
+		if (sctx) {
+			// Sprite origin at center; geometry in sprite CSS pixels = world·zoom.
+			sctx.setTransform(
+				dpr * zoom,
+				0,
+				0,
+				dpr * zoom,
+				sprite.width / 2,
+				sprite.height / 2,
+			);
+			sctx.beginPath();
+			traceShapePath(sctx, shape);
+			if (isStatic) {
+				sctx.fillStyle = STATIC_FILL;
+				sctx.fill();
+				sctx.strokeStyle = GROUND_COLOR;
+				sctx.lineWidth = STATIC_STROKE_WIDTH_PX / zoom;
+				sctx.stroke();
+			} else {
+				sctx.shadowColor = BODY_SHADOW;
+				sctx.shadowBlur = BODY_SHADOW_BLUR_PX;
+				sctx.shadowOffsetY = BODY_SHADOW_OFFSET_Y_PX;
+				sctx.fillStyle = color;
+				sctx.fill();
+			}
+		}
+		return {
+			canvas: sprite,
+			halfW: hw + marginW,
+			halfH: hh + marginW,
+			zoom,
+			dpr,
+			color,
+			isStatic,
+			shape,
+		};
+	}
+
 	function drawBodies(zoom: number): void {
 		const scene = options.scene;
 		if (!scene) return;
 		const hoverId = scene.hoverId();
 		const selectedIds = scene.selectedIds();
 		const lift = HOVER_LIFT_PX / zoom;
-		ctx.shadowBlur = BODY_SHADOW_BLUR_PX;
-		ctx.shadowOffsetY = BODY_SHADOW_OFFSET_Y_PX;
+		const dpr = window.devicePixelRatio;
+		const seen = new Set<string>();
 		scene.forEachBody((id, shape, x, y, rot, isStatic, color) => {
 			const hovered = id === hoverId;
-			ctx.save();
-			ctx.translate(x, hovered && !isStatic ? y - lift : y);
-			if (isStatic) {
-				// Ground-like treatment: no contact shadow, ground-line stroke.
-				ctx.shadowColor = hovered ? HOVER_GLOW : "transparent";
-				ctx.shadowBlur = hovered ? HOVER_GLOW_BLUR_PX : 0;
+			seen.add(id);
+			if (hovered) {
+				// The one live path: hover glow (lift only for dynamic bodies,
+				// static geometry does not hover-lift).
+				ctx.save();
+				ctx.translate(x, !isStatic ? y - lift : y);
 				ctx.rotate(rot);
+				ctx.shadowColor = HOVER_GLOW;
+				ctx.shadowBlur = HOVER_GLOW_BLUR_PX;
 				ctx.beginPath();
 				traceShapePath(ctx, shape);
-				ctx.fillStyle = STATIC_FILL;
-				ctx.fill();
-				ctx.shadowColor = "transparent";
-				ctx.shadowBlur = 0;
-				ctx.strokeStyle = GROUND_COLOR;
-				ctx.lineWidth = STATIC_STROKE_WIDTH_PX / zoom;
-				ctx.stroke();
-			} else {
-				ctx.shadowColor = hovered ? HOVER_GLOW : BODY_SHADOW;
-				ctx.shadowBlur = hovered ? HOVER_GLOW_BLUR_PX : BODY_SHADOW_BLUR_PX;
-				ctx.rotate(rot);
-				ctx.beginPath();
-				traceShapePath(ctx, shape);
-				ctx.fillStyle = color;
-				ctx.fill();
+				if (isStatic) {
+					ctx.fillStyle = STATIC_FILL;
+					ctx.fill();
+					ctx.shadowColor = "transparent";
+					ctx.shadowBlur = 0;
+					ctx.strokeStyle = GROUND_COLOR;
+					ctx.lineWidth = STATIC_STROKE_WIDTH_PX / zoom;
+					ctx.stroke();
+				} else {
+					ctx.fillStyle = color;
+					ctx.fill();
+				}
+				ctx.restore();
+				return;
 			}
+			let sprite = bodySprites.get(id);
+			if (
+				!sprite ||
+				sprite.shape !== shape ||
+				sprite.color !== color ||
+				sprite.isStatic !== isStatic ||
+				sprite.dpr !== dpr ||
+				Math.abs(sprite.zoom / zoom - 1) > SPRITE_ZOOM_DRIFT
+			) {
+				sprite = rasterizeBodySprite(shape, color, isStatic, zoom, dpr);
+				bodySprites.set(id, sprite);
+			}
+			ctx.save();
+			ctx.translate(x, y);
+			ctx.rotate(rot);
+			ctx.drawImage(
+				sprite.canvas,
+				-sprite.halfW,
+				-sprite.halfH,
+				sprite.halfW * 2,
+				sprite.halfH * 2,
+			);
 			ctx.restore();
 		});
+		// Prune sprites of bodies that left the document (deletes, restores).
+		if (bodySprites.size > seen.size + 64) {
+			for (const id of bodySprites.keys()) {
+				if (!seen.has(id)) bodySprites.delete(id);
+			}
+		}
 		if (selectedIds.length > 0) drawSelectionOutlines(selectedIds, zoom);
 	}
 

@@ -95,8 +95,12 @@ test("0.5× advances about half the sim time of 1×; advanceTime stays exact", a
 	const ratio = ticksHalf / ticks1x;
 	// Half the feed rate: a wide band around 0.5 — tight enough to fail if the
 	// scale is ignored (ratio would be ~1) or misapplied as a per-tick dt.
-	expect(ratio).toBeGreaterThan(0.3);
-	expect(ratio).toBeLessThan(0.7);
+	// Wide margins: the assertion must separate "≈half" from the failure
+	// modes (ignored ≈1, misapplied ≫1), not pin 0.5 — host load shifts the
+	// wall-clock windows and flipped the old 0.3–0.7 bound (measured twice on
+	// 2026-10-24 at load ~10; clean runs pass in 4 s).
+	expect(ratio).toBeGreaterThan(0.25);
+	expect(ratio).toBeLessThan(0.8);
 
 	// Determinism guard: pause the wall-clock feed again (an rAF frame between
 	// the evaluates below would leave a real-time remainder in the accumulator),

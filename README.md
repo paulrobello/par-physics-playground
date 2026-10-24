@@ -30,6 +30,6 @@ make visual           # compare against e2e-visual/__screenshots__/ baselines
 make visual-update    # re-capture baselines after an intentional design change
 ```
 
-CI (GitHub Actions) runs typecheck + lint + unit tests on every push and pull request. The repository has no remote yet, so first-push CI verification is still pending.
+CI (GitHub Actions) runs typecheck + lint + unit tests on every push and pull request. The `Deploy` workflow builds and publishes to GitHub Pages on every push to `main`.
 
-Deployment target: https://physics.pardev.net
+Deployment: live at https://physics.pardev.net (DNS-only CNAME → `paulrobello.github.io`, custom domain registered on the repo, Actions-based Pages deploys).

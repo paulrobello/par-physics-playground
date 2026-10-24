@@ -15,6 +15,11 @@ export default defineConfig({
 	use: {
 		baseURL: "http://127.0.0.1:8114",
 		channel: "chromium",
+		// Headed: headless Chromium throttles rAF (~14 Hz measured 2026-10-24,
+		// while the same page ran 120 fps headed) — a timing harness must not
+		// measure the throttle (house browser rule: headed when the
+		// measurement requires it).
+		headless: false,
 		launchOptions: {
 			args:
 				process.env.PW_GPU === "swiftshader"

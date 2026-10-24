@@ -11,6 +11,9 @@ const MAX_ZOOM = 20;
 test("wheel zooms anchored at cursor, drag pans, conversions stay exact", async ({
 	page,
 }) => {
+	// 60 s, not the 30 s config default: the 80 wheel events flip past the
+	// default under host load (measured 2026-10-24; clean runs pass in ~21 s).
+	test.setTimeout(60_000);
 	await page.goto("/?debug=1");
 	await page.waitForFunction(() => window.__ppg !== undefined);
 

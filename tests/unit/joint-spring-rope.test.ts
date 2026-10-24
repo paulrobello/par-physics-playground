@@ -242,8 +242,8 @@ describe("rope chain math", () => {
 			ok: false,
 			reason: "per-chain",
 		});
-		// 11 new segments on top of a scene already at 192 − 9: over the total.
-		expect(buildRopeChain(line(20), { existingTotal: 183 })).toEqual({
+		// 11 new segments on top of a scene already at 384 − 9: over the total.
+		expect(buildRopeChain(line(20), { existingTotal: 375 })).toEqual({
 			ok: false,
 			reason: "total",
 		});

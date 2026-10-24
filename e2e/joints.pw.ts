@@ -438,13 +438,13 @@ test("rope caps reject excess placement visibly; the joint tool draws a rope str
 	expect(toolRope.segments ?? 0).toBeGreaterThanOrEqual(8);
 	expect(toolRope.ropeLinks ?? 0).toBeGreaterThanOrEqual(6);
 
-	// --- Fill toward the total cap: two more 62-segment chains (plus the
-	// tool chain's ~11) puts the scene past 192 − 62, so a third 62-segment
+	// --- Fill toward the total cap: six more 62-segment chains (plus the
+	// tool chain's ~11) puts the scene past 384 − 62, so a seventh 62-segment
 	// chain overflows and refuses visibly (D17).
 	await page.evaluate(() => {
 		const ppg = window.__ppg;
 		if (!ppg) throw new Error("no debug api");
-		for (let c = 0; c < 2; c++) {
+		for (let c = 0; c < 6; c++) {
 			const y = -300 - c * 30;
 			const res = ppg.spawnRope?.([
 				{ x: -60, y },
@@ -470,7 +470,7 @@ test("rope caps reject excess placement visibly; the joint tool draws a rope str
 	expect(rejected.after).toBe(rejected.before);
 	// The refusal is VISIBLE: the notice toast names the total cap.
 	await expect(page.locator("#ppg-notice")).toBeVisible();
-	await expect(page.locator("#ppg-notice")).toContainText("192 rope segments");
+	await expect(page.locator("#ppg-notice")).toContainText("384 rope segments");
 
 	// --- Per-chain cap, on a fresh page (the toast persists ~3 s): one
 	// 200-unit stroke would be 101 segments — over the 64 per-chain cap.
