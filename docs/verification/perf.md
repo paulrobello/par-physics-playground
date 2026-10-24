@@ -70,3 +70,16 @@ through the stage listener) with the 200-box scene loaded:
 Even a 200 Hz pointer stream costs <2% of the 8.3 ms frame budget (p95).
 The hover pick + worldFromEvent rebuild does not warrant optimization;
 measured before touching it, per the card.
+
+## Undo snapshot JSON cost (2026-10-24, measurement card)
+
+`same()` (JSON.stringify compare per commit) and `cloneDocEntities()`,
+measured on realistic box documents (bun bench, 100 iterations each):
+
+| entities | same() | clone |
+|---|---|---|
+| 500 | 0.09 ms | 0.01 ms |
+| 1000 | 0.16 ms | 0.02 ms |
+
+Commits happen per user action, not per frame — 0.16 ms against an 8.3 ms
+frame is noise. No optimization warranted.
