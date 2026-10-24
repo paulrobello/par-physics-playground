@@ -1,6 +1,8 @@
 /**
  * Rapier2D world wrapper: static ground line at y=0, kill-threshold culling,
- * and the document-ID → Rapier body registry.
+ * and the document-ID → Rapier body registry backed by the scene document
+ * (src/lib/document.ts) — the registry maps document entities to live Rapier
+ * bodies, and editing operations (move/rotate/remove/duplicate) mutate both.
  *
  * World convention (owned here since P1-T3, which first draws bodies): a
  * single y-down world. Positive world y is DOWN on screen — the same y-down
@@ -10,7 +12,24 @@
  */
 import RAPIER from "@dimforge/rapier2d-compat";
 import { SIM_DT_SECONDS } from "./clock";
+import {
+	type BodyEntity,
+	type BodyShape,
+	type DocEntity,
+	defaultBody,
+	type LabelEntity,
+	SceneDocument,
+} from "./document";
 import { MATERIAL_DEFAULT } from "./material";
+import {
+	cleanPolygon,
+	completeDecomposition,
+	polygonCentroid,
+	polygonIsConvex,
+	polygonIsSimple,
+	triangulate,
+	type Vec2,
+} from "./triangulate";
 
 /** Ground cuboid half-width: a "line" far beyond any scene the app can show. */
 export const GROUND_HALF_EXTENT = 10_000;
@@ -19,20 +38,25 @@ export const KILL_THRESHOLD_Y = 1_000;
 /** Ground is a thin slab whose top surface sits at y=0. */
 const GROUND_HALF_THICKNESS = 0.5;
 
+/** Polygon vertices as the interleaved Float32Array Rapier's convexHull takes. */
+function flatPoints(points: readonly Vec2[]): Float32Array {
+	const flat = new Float32Array(points.length * 2);
+	for (let i = 0; i < points.length; i++) {
+		const p = points[i] as Vec2;
+		flat[i * 2] = p.x;
+		flat[i * 2 + 1] = p.y;
+	}
+	return flat;
+}
+
 /** y-down world: gravity accelerates toward positive y (down on screen). */
 export const WORLD_GRAVITY: RAPIER.Vector = { x: 0, y: 9.81 };
 
 /** Document IDs are strings throughout the app (canvas docs, later persistence). */
 export type DocumentId = string;
 
-/** Render shape of a registry body, recorded at spawn for drawing and picking. */
-export type BodyShape =
-	| {
-			readonly kind: "box";
-			readonly halfWidth: number;
-			readonly halfHeight: number;
-	  }
-	| { readonly kind: "circle"; readonly radius: number };
+/** Render shape of a registry body (re-exported from the document layer). */
+export type { BodyShape } from "./document";
 
 export interface SpawnBoxOptions {
 	readonly restitution?: number;
@@ -47,17 +71,19 @@ const MOUSE_JOINT_DAMPING_PER_MASS = 40;
 
 export class PhysicsWorld {
 	readonly world: RAPIER.World;
+	/** Serializable document: identity, geometry, transform per body. */
+	readonly doc = new SceneDocument();
+	/** Simulation view: document id → live Rapier body. */
 	readonly bodies = new Map<DocumentId, RAPIER.RigidBody>();
-	readonly shapes = new Map<DocumentId, BodyShape>();
 
 	private groundBody: RAPIER.RigidBody | null = null;
 	/**
-	 * Invoked for each body removed by kill-threshold culling in {@link step}.
+	 * Invoked for every removed entity (delete, cull, reset, or replacement).
 	 * Consumers holding per-body handles (e.g. the interaction layer's active
 	 * drag joint) must drop them here: a culled body's joints are destroyed
 	 * with it, so a retained joint handle is stale.
 	 */
-	onCull: ((id: DocumentId) => void) | null = null;
+	onRemove: ((id: DocumentId) => void) | null = null;
 
 	static async create(): Promise<PhysicsWorld> {
 		await RAPIER.init();
@@ -82,6 +108,172 @@ export class PhysicsWorld {
 		);
 	}
 
+	/**
+	 * Create the Rapier simulation state for a document entity and register it.
+	 * Replacing an existing id removes its old body first (spawn-overwrite is
+	 * the P1 debug-API contract).
+	 */
+	spawnEntity(entity: BodyEntity): RAPIER.RigidBody {
+		if (entity.shape.kind === "polygon") {
+			const points = entity.shape.points;
+			if (
+				!polygonIsSimple(points) ||
+				!completeDecomposition(points, triangulate(points))
+			) {
+				console.warn("[par-physics] Polygon rejected: invalid decomposition");
+				throw new Error("polygon has no valid convex decomposition");
+			}
+		}
+		const existing = this.bodies.get(entity.id);
+		if (existing) this.removeBody(entity.id);
+		const desc = entity.isStatic
+			? RAPIER.RigidBodyDesc.fixed()
+			: RAPIER.RigidBodyDesc.dynamic();
+		const body = this.world.createRigidBody(
+			desc.setTranslation(entity.x, entity.y),
+		);
+		body.setRotation(entity.rot, true);
+		this.attachShape(body, entity.shape);
+		this.doc.add(entity);
+		this.bodies.set(entity.id, body);
+		return body;
+	}
+
+	/**
+	 * Convex polygon → one convex-hull collider; concave → ear-clipping
+	 * triangles, one collider each, all parented under the single body (Rapier
+	 * supports multiple colliders per rigid body), so a concave polygon rests
+	 * and collides as one rigid unit. Returns undefined for degenerate input
+	 * (zero area after cleanup); the polygon tool commits only valid polygons.
+	 */
+	spawnPolygon(
+		id: DocumentId,
+		points: readonly Vec2[],
+		isStatic = false,
+	): RAPIER.RigidBody | undefined {
+		const cleaned = cleanPolygon(points);
+		if (
+			!cleaned ||
+			!polygonIsSimple(cleaned) ||
+			!completeDecomposition(cleaned, triangulate(cleaned))
+		) {
+			console.warn(
+				"[par-physics] Polygon rejected: degenerate, self-intersecting, or incomplete decomposition",
+			);
+			return undefined;
+		}
+		const centroid = polygonCentroid(cleaned);
+		const local = cleaned.map((p) => ({
+			x: p.x - centroid.x,
+			y: p.y - centroid.y,
+		}));
+		return this.spawnEntity({
+			...defaultBody(
+				id,
+				{ kind: "polygon", points: local },
+				centroid.x,
+				centroid.y,
+			),
+			isStatic,
+		});
+	}
+
+	/**
+	 * Add a non-physical label to the document (no Rapier body — the renderer
+	 * draws it and the picker hit-tests it). The text is set by
+	 * {@link setLabelText} when the text tool's inline edit commits.
+	 */
+	addLabel(id: DocumentId, x: number, y: number): DocumentId {
+		this.doc.add({
+			kind: "label",
+			id,
+			x,
+			y,
+			rot: 0,
+			text: "",
+		} satisfies LabelEntity);
+		return id;
+	}
+
+	setLabelText(id: DocumentId, text: string): void {
+		this.doc.setLabelText(id, text);
+	}
+
+	/** The document's labels, in insertion order. */
+	labels(): LabelEntity[] {
+		const out: LabelEntity[] = [];
+		for (const e of this.doc.all()) if (e.kind === "label") out.push(e);
+		return out;
+	}
+
+	labelOf(id: DocumentId): LabelEntity | undefined {
+		const e = this.doc.get(id);
+		return e && e.kind === "label" ? e : undefined;
+	}
+
+	/** Offset copy of a label; returns the new id, or undefined if unknown. */
+	duplicateLabel(
+		id: DocumentId,
+		newId: DocumentId,
+		dx: number,
+		dy: number,
+	): DocumentId | undefined {
+		const label = this.labelOf(id);
+		if (!label) return undefined;
+		this.doc.add({
+			...label,
+			id: newId,
+			x: label.x + dx,
+			y: label.y + dy,
+		});
+		return newId;
+	}
+
+	/** Create every collider a shape needs, with the default material. */
+	private attachShape(body: RAPIER.RigidBody, shape: BodyShape): void {
+		if (shape.kind === "polygon") {
+			if (polygonIsConvex(shape.points)) {
+				this.world.createCollider(
+					this.materialize(
+						RAPIER.ColliderDesc.convexHull(flatPoints(shape.points)),
+					),
+					body,
+				);
+			} else {
+				// Concave: one collider per triangulated part, all under the one
+				// rigid body — the parts move and rest as a single rigid unit.
+				for (const [a, b, c] of triangulate(shape.points)) {
+					const pa = shape.points[a] as Vec2;
+					const pb = shape.points[b] as Vec2;
+					const pc = shape.points[c] as Vec2;
+					this.world.createCollider(
+						this.materialize(
+							RAPIER.ColliderDesc.convexHull(
+								new Float32Array([pa.x, pa.y, pb.x, pb.y, pc.x, pc.y]),
+							),
+						),
+						body,
+					);
+				}
+			}
+			return;
+		}
+		const desc =
+			shape.kind === "box"
+				? RAPIER.ColliderDesc.cuboid(shape.halfWidth, shape.halfHeight)
+				: RAPIER.ColliderDesc.ball(shape.radius);
+		this.world.createCollider(this.materialize(desc), body);
+	}
+
+	/** Apply default material to a collider descriptor (null-safe for hulls). */
+	private materialize(desc: RAPIER.ColliderDesc | null): RAPIER.ColliderDesc {
+		if (!desc) throw new Error("polygon has no valid convex decomposition");
+		return desc
+			.setDensity(MATERIAL_DEFAULT.density)
+			.setFriction(MATERIAL_DEFAULT.friction)
+			.setRestitution(MATERIAL_DEFAULT.restitution);
+	}
+
 	spawnBox(
 		id: DocumentId,
 		x: number,
@@ -90,18 +282,11 @@ export class PhysicsWorld {
 		halfHeight: number,
 		options: SpawnBoxOptions = {},
 	): RAPIER.RigidBody {
-		const existing = this.bodies.get(id);
-		if (existing) this.world.removeRigidBody(existing);
-		const body = this.world.createRigidBody(
-			RAPIER.RigidBodyDesc.dynamic().setTranslation(x, y),
+		const body = this.spawnEntity(
+			defaultBody(id, { kind: "box", halfWidth, halfHeight }, x, y),
 		);
-		const collider = RAPIER.ColliderDesc.cuboid(halfWidth, halfHeight)
-			.setDensity(MATERIAL_DEFAULT.density)
-			.setFriction(MATERIAL_DEFAULT.friction)
-			.setRestitution(options.restitution ?? MATERIAL_DEFAULT.restitution);
-		this.world.createCollider(collider, body);
-		this.bodies.set(id, body);
-		this.shapes.set(id, { kind: "box", halfWidth, halfHeight });
+		if (options.restitution !== undefined)
+			body.collider(0)?.setRestitution(options.restitution);
 		return body;
 	}
 
@@ -110,30 +295,120 @@ export class PhysicsWorld {
 		x: number,
 		y: number,
 		radius: number,
+		isStatic = false,
 	): RAPIER.RigidBody {
-		const existing = this.bodies.get(id);
-		if (existing) this.world.removeRigidBody(existing);
-		const body = this.world.createRigidBody(
-			RAPIER.RigidBodyDesc.dynamic().setTranslation(x, y),
-		);
-		this.world.createCollider(
-			RAPIER.ColliderDesc.ball(radius)
-				.setDensity(MATERIAL_DEFAULT.density)
-				.setFriction(MATERIAL_DEFAULT.friction)
-				.setRestitution(MATERIAL_DEFAULT.restitution),
-			body,
-		);
-		this.bodies.set(id, body);
-		this.shapes.set(id, { kind: "circle", radius });
-		return body;
+		return this.spawnEntity({
+			...defaultBody(id, { kind: "circle", radius }, x, y),
+			isStatic,
+		});
 	}
 
 	bodyPosition(id: DocumentId): RAPIER.Vector | undefined {
 		return this.bodies.get(id)?.translation();
 	}
 
+	bodyRotation(id: DocumentId): number | undefined {
+		return this.bodies.get(id)?.rotation();
+	}
+
 	shapeOf(id: DocumentId): BodyShape | undefined {
-		return this.shapes.get(id);
+		const e = this.doc.get(id);
+		return e?.kind === "body" ? e.shape : undefined;
+	}
+
+	/**
+	 * Kinematic move: teleport a body (paused editing) or override its position
+	 * mid-simulation. Wakes the body — a sleeping body would ignore the change.
+	 */
+	moveBody(id: DocumentId, x: number, y: number): void {
+		const body = this.bodies.get(id);
+		if (!body) return;
+		body.setTranslation({ x, y }, true);
+		this.doc.setTransform(id, x, y, body.rotation());
+	}
+
+	/**
+	 * Kinematic rotate about the body's own centre. Wakes the body; works the
+	 * same paused or running (a running dynamic body simply gets its rotation
+	 * overridden for this instant).
+	 */
+	rotateBody(id: DocumentId, rot: number): void {
+		const body = this.bodies.get(id);
+		if (!body) return;
+		body.setRotation(rot, true);
+		const p = body.translation();
+		this.doc.setTransform(id, p.x, p.y, rot);
+	}
+
+	/**
+	 * Remove a body from the simulation and the document. Doc-only entities
+	 * (labels, which have no Rapier body) are removed from the document.
+	 */
+	removeBody(id: DocumentId): void {
+		const body = this.bodies.get(id);
+		if (body) {
+			this.world.removeRigidBody(body);
+			this.bodies.delete(id);
+		}
+		this.doc.remove(id);
+		this.onRemove?.(id);
+	}
+
+	/**
+	 * Offset copy of a body in the document and simulation; returns the new id.
+	 * The offset base is the LIVE transform, not the document's (the document
+	 * only syncs on editing operations, so while the sim runs a body's doc
+	 * transform is stale — duplicating a fallen body must copy from where it
+	 * actually is).
+	 */
+	duplicateBody(
+		id: DocumentId,
+		newId: DocumentId,
+		dx: number,
+		dy: number,
+	): DocumentId | undefined {
+		const entity = this.doc.get(id);
+		const body = this.bodies.get(id);
+		if (entity?.kind !== "body" || !body) return undefined;
+		const p = body.translation();
+		this.spawnEntity({
+			...entity,
+			id: newId,
+			x: p.x + dx,
+			y: p.y + dy,
+			rot: body.rotation(),
+		});
+		return newId;
+	}
+
+	/**
+	 * Write every body's live translation/rotation into its document entity.
+	 * The document only syncs on editing operations; a snapshot serializer
+	 * (P2-T5 undo) must call this first so the document matches the sim state.
+	 */
+	syncLiveTransforms(): void {
+		for (const [id, body] of this.bodies) {
+			const p = body.translation();
+			this.doc.setTransform(id, p.x, p.y, body.rotation());
+		}
+	}
+
+	/**
+	 * Destroy every body and rebuild the scene from a document snapshot
+	 * (undo/redo restore). Entities are inserted in document order, so draw
+	 * order and topmost-picking survive; the ground stays. Rapier state is
+	 * destroyed and recreated — acceptable for a sandbox at this scale, and
+	 * measured in the e2e.
+	 */
+	restoreSnapshot(entities: readonly DocEntity[]): void {
+		this.reset();
+		for (const entity of entities) {
+			if (entity.kind === "body") {
+				this.spawnEntity(entity);
+			} else {
+				this.doc.add(entity);
+			}
+		}
 	}
 
 	/**
@@ -193,11 +468,9 @@ export class PhysicsWorld {
 		return { x: dx * cos + dy * sin, y: -dx * sin + dy * cos };
 	}
 
-	/** Remove every dynamic body and its recorded shape; the ground stays. */
+	/** Remove every entity, including terrain and labels; the ground stays. */
 	reset(): void {
-		for (const body of this.bodies.values()) this.world.removeRigidBody(body);
-		this.bodies.clear();
-		this.shapes.clear();
+		for (const id of this.doc.ids()) this.removeBody(id);
 	}
 
 	/** One fixed tick: advance physics, then cull bodies below the kill threshold. */
@@ -205,10 +478,7 @@ export class PhysicsWorld {
 		this.world.step();
 		for (const [id, body] of this.bodies) {
 			if (body.translation().y > KILL_THRESHOLD_Y) {
-				this.world.removeRigidBody(body);
-				this.bodies.delete(id);
-				this.shapes.delete(id);
-				this.onCull?.(id);
+				this.removeBody(id);
 			}
 		}
 	}

@@ -94,9 +94,25 @@ body {
 	border-color: var(--panel-border);
 }
 
+.tool-sep {
+	width: 24px;
+	height: 1px;
+	background: var(--panel-border);
+}
+
 .tool-btn.active {
 	color: var(--accent);
 	border-color: var(--accent);
+}
+
+.tool-btn:disabled {
+	opacity: 0.35;
+	cursor: default;
+}
+
+.tool-btn:disabled:hover {
+	color: var(--hud-text-secondary);
+	border-color: transparent;
 }
 
 .tool-btn svg {

@@ -10,6 +10,11 @@
 
 import type { Camera } from "./lib/camera";
 import { MATERIAL_DEFAULT } from "./lib/material";
+import {
+	type DrawPreview,
+	effectiveLabelFontSize,
+	labelBounds,
+} from "./lib/tools";
 import type { BodyShape } from "./lib/world";
 
 /** Read-only view the renderer draws from, wired up in main.ts. */
@@ -21,15 +26,24 @@ export interface SceneView {
 			x: number,
 			y: number,
 			rot: number,
+			isStatic: boolean,
 		) => void,
 	): void;
+	/** Non-physical labels, in document order (drawn above bodies). */
+	forEachLabel(
+		fn: (id: string, x: number, y: number, rot: number, text: string) => void,
+	): void;
 	/** In-progress drawing preview geometry, or null. */
-	preview():
-		| { cx: number; cy: number; halfWidth: number; halfHeight: number }
-		| { cx: number; cy: number; radius: number }
-		| null;
+	preview(): DrawPreview | null;
 	hoverId(): string | undefined;
-	selectedId(): string | undefined;
+	selectedIds(): readonly string[];
+	/** In-progress rubber-band selection rectangle, or null. */
+	rubberBand(): {
+		cx: number;
+		cy: number;
+		halfWidth: number;
+		halfHeight: number;
+	} | null;
 }
 
 export interface Renderer {
@@ -72,6 +86,33 @@ const SELECTION_WIDTH_PX = 2;
 /** Draw-preview fill alpha and stroke width (CSS px). */
 const PREVIEW_FILL = "rgba(74, 163, 255, 0.12)";
 const PREVIEW_WIDTH_PX = 1.5;
+
+/** Label text color (HUD primary-text token). */
+const LABEL_COLOR = "#e6e9ee";
+/** Label caret shown while the text tool edits an empty label. */
+const LABEL_CARET_WIDTH_PX = 1.5;
+/**
+ * Static (terrain) bodies get the ground-line tone family instead of the
+ * dynamic material fill: translucent slate fill + ground-line stroke, no
+ * drop shadow (static geometry does not fall, so it does not hover).
+ */
+const STATIC_FILL = "rgba(152, 162, 179, 0.22)";
+const STATIC_STROKE_WIDTH_PX = 1.5;
+
+/** Trace a closed polygon path (caller starts/ends the path). */
+function tracePolyPath(
+	ctx: CanvasRenderingContext2D,
+	points: readonly { readonly x: number; readonly y: number }[],
+): void {
+	const first = points[0];
+	if (!first) return;
+	ctx.moveTo(first.x, first.y);
+	for (let i = 1; i < points.length; i++) {
+		const p = points[i] as { x: number; y: number };
+		ctx.lineTo(p.x, p.y);
+	}
+	ctx.closePath();
+}
 
 export function createRenderer(
 	canvas: HTMLCanvasElement,
@@ -165,7 +206,9 @@ export function createRenderer(
 		// Bodies: drawn in the same world transform, above grid and ground line.
 		if (options.scene) {
 			drawBodies(zoom);
+			drawLabels(zoom);
 			drawPreview(zoom);
+			drawRubberBand(zoom);
 		}
 
 		ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -173,69 +216,57 @@ export function createRenderer(
 
 	/**
 	 * Bodies from the physics state: filled with the material color, soft
-	 * contact shadow, hover lift + accent glow, selection outline. `zoom`
-	 * converts screen-constant widths to world units.
+	 * contact shadow, hover lift + accent glow, selection outline. Static
+	 * (terrain) bodies get the ground-line tone family instead — translucent
+	 * slate fill, ground-line stroke, no drop shadow or hover lift (static
+	 * geometry does not fall, so it does not hover-lift). `zoom` converts
+	 * screen-constant widths to world units.
 	 */
 	function drawBodies(zoom: number): void {
 		const scene = options.scene;
 		if (!scene) return;
 		const hoverId = scene.hoverId();
-		const selectedId = scene.selectedId();
+		const selectedIds = scene.selectedIds();
 		const lift = HOVER_LIFT_PX / zoom;
 		ctx.shadowBlur = BODY_SHADOW_BLUR_PX;
 		ctx.shadowOffsetY = BODY_SHADOW_OFFSET_Y_PX;
-		ctx.fillStyle = MATERIAL_DEFAULT.color;
-		scene.forEachBody((id, shape, x, y, rot) => {
+		scene.forEachBody((id, shape, x, y, rot, isStatic) => {
 			const hovered = id === hoverId;
-			ctx.shadowColor = hovered ? HOVER_GLOW : BODY_SHADOW;
-			if (hovered) ctx.shadowBlur = HOVER_GLOW_BLUR_PX;
 			ctx.save();
-			ctx.translate(x, hovered ? y - lift : y);
-			ctx.rotate(rot);
-			ctx.beginPath();
-			if (shape.kind === "box") {
-				ctx.rect(
-					-shape.halfWidth,
-					-shape.halfHeight,
-					shape.halfWidth * 2,
-					shape.halfHeight * 2,
-				);
+			ctx.translate(x, hovered && !isStatic ? y - lift : y);
+			if (isStatic) {
+				// Ground-like treatment: no contact shadow, ground-line stroke.
+				ctx.shadowColor = hovered ? HOVER_GLOW : "transparent";
+				ctx.shadowBlur = hovered ? HOVER_GLOW_BLUR_PX : 0;
+				ctx.rotate(rot);
+				ctx.beginPath();
+				traceShapePath(ctx, shape);
+				ctx.fillStyle = STATIC_FILL;
+				ctx.fill();
+				ctx.shadowColor = "transparent";
+				ctx.shadowBlur = 0;
+				ctx.strokeStyle = GROUND_COLOR;
+				ctx.lineWidth = STATIC_STROKE_WIDTH_PX / zoom;
+				ctx.stroke();
 			} else {
-				ctx.arc(0, 0, shape.radius, 0, Math.PI * 2);
+				ctx.shadowColor = hovered ? HOVER_GLOW : BODY_SHADOW;
+				ctx.shadowBlur = hovered ? HOVER_GLOW_BLUR_PX : BODY_SHADOW_BLUR_PX;
+				ctx.rotate(rot);
+				ctx.beginPath();
+				traceShapePath(ctx, shape);
+				ctx.fillStyle = MATERIAL_DEFAULT.color;
+				ctx.fill();
 			}
-			ctx.fill();
 			ctx.restore();
-			if (hovered) {
-				ctx.shadowBlur = BODY_SHADOW_BLUR_PX;
-				ctx.shadowOffsetY = BODY_SHADOW_OFFSET_Y_PX;
-			}
 		});
-		ctx.shadowColor = "transparent";
-		ctx.shadowBlur = 0;
-		ctx.shadowOffsetY = 0;
-		if (selectedId !== undefined) drawSelectionOutline(selectedId, zoom);
+		if (selectedIds.length > 0) drawSelectionOutlines(selectedIds, zoom);
 	}
 
-	/** Accent outline + glow around the selected body. */
-	function drawSelectionOutline(id: string, zoom: number): void {
-		const scene = options.scene;
-		if (!scene) return;
-		let found:
-			| { shape: BodyShape; x: number; y: number; rot: number }
-			| undefined;
-		scene.forEachBody((bid, shape, x, y, rot) => {
-			if (bid === id) found = { shape, x, y, rot };
-		});
-		if (!found) return;
-		ctx.shadowColor = HOVER_GLOW;
-		ctx.shadowBlur = HOVER_GLOW_BLUR_PX;
-		ctx.strokeStyle = ACCENT_COLOR;
-		ctx.lineWidth = SELECTION_WIDTH_PX / zoom;
-		ctx.save();
-		const { shape, x, y, rot } = found;
-		ctx.translate(x, y);
-		ctx.rotate(rot);
-		ctx.beginPath();
+	/** Trace any body shape's closed path (caller begins/ends the path). */
+	function traceShapePath(
+		ctx: CanvasRenderingContext2D,
+		shape: BodyShape,
+	): void {
 		if (shape.kind === "box") {
 			ctx.rect(
 				-shape.halfWidth,
@@ -243,13 +274,93 @@ export function createRenderer(
 				shape.halfWidth * 2,
 				shape.halfHeight * 2,
 			);
+		} else if (shape.kind === "polygon") {
+			tracePolyPath(ctx, shape.points);
 		} else {
-			ctx.arc(0, 0, shape.radius + 1 / zoom, 0, Math.PI * 2);
+			ctx.arc(0, 0, shape.radius, 0, Math.PI * 2);
 		}
-		ctx.stroke();
-		ctx.restore();
+	}
+
+	/**
+	 * Committed labels: the text drawn in world space, anchored at the left
+	 * end of the baseline. The font scales with the camera transform, clamped
+	 * to a readable screen-size window ([LABEL_MIN_PX, LABEL_MAX_PX] CSS px)
+	 * so zooming out never makes labels unreadably small and zooming in never
+	 * makes them balloon.
+	 */
+	function drawLabels(zoom: number): void {
+		const scene = options.scene;
+		if (!scene) return;
+		ctx.fillStyle = LABEL_COLOR;
+		ctx.font = labelFont(zoom);
+		scene.forEachLabel((_id, x, y, rot, text) => {
+			ctx.save();
+			ctx.translate(x, y);
+			ctx.rotate(rot);
+			ctx.fillText(text, 0, 0);
+			ctx.restore();
+		});
+	}
+
+	/**
+	 * The canvas font string for labels at the current zoom: the shared
+	 * {@link effectiveLabelFontSize} — the same size the picker and the
+	 * selection outline use, so hit boxes match the drawn glyphs.
+	 */
+	function labelFont(zoom: number): string {
+		return `${effectiveLabelFontSize(zoom)}px system-ui, -apple-system, sans-serif`;
+	}
+
+	/** Accent outlines + glow around every selected body. */
+	function drawSelectionOutlines(ids: readonly string[], zoom: number): void {
+		const scene = options.scene;
+		if (!scene) return;
+		ctx.shadowColor = HOVER_GLOW;
+		ctx.shadowBlur = HOVER_GLOW_BLUR_PX;
+		ctx.strokeStyle = ACCENT_COLOR;
+		ctx.lineWidth = SELECTION_WIDTH_PX / zoom;
+		const wanted = new Set(ids);
+		scene.forEachBody((bid, shape, x, y, rot) => {
+			if (!wanted.has(bid)) return;
+			ctx.save();
+			ctx.translate(x, y);
+			ctx.rotate(rot);
+			ctx.beginPath();
+			traceShapePath(ctx, shape);
+			ctx.stroke();
+			ctx.restore();
+		});
+		// Selected labels: accent rectangle around the estimated hit box,
+		// sized to the font actually drawn at this zoom.
+		scene.forEachLabel((lid, x, y, rot, text) => {
+			if (!wanted.has(lid)) return;
+			ctx.save();
+			ctx.translate(x, y);
+			ctx.rotate(rot);
+			const b = labelBounds(0, 0, text, effectiveLabelFontSize(zoom));
+			ctx.strokeRect(b.x0, b.y0, b.x1 - b.x0, b.y1 - b.y0);
+			ctx.restore();
+		});
 		ctx.shadowColor = "transparent";
 		ctx.shadowBlur = 0;
+	}
+
+	/** Accent rubber-band rectangle while it sizes the selection frame. */
+	function drawRubberBand(zoom: number): void {
+		const scene = options.scene;
+		if (!scene) return;
+		const rect = scene.rubberBand();
+		if (!rect) return;
+		ctx.strokeStyle = ACCENT_COLOR;
+		ctx.lineWidth = 1 / zoom;
+		ctx.setLineDash([4 / zoom, 3 / zoom]);
+		ctx.strokeRect(
+			rect.cx - rect.halfWidth,
+			rect.cy - rect.halfHeight,
+			rect.halfWidth * 2,
+			rect.halfHeight * 2,
+		);
+		ctx.setLineDash([]);
 	}
 
 	/** Accent preview with glow while a draw tool sizes a shape. */
@@ -264,7 +375,41 @@ export function createRenderer(
 		ctx.strokeStyle = ACCENT_COLOR;
 		ctx.lineWidth = PREVIEW_WIDTH_PX / zoom;
 		ctx.beginPath();
-		if ("halfWidth" in p) {
+		if (p.kind === "line") {
+			// Path construction captures the transform; restore is safe.
+			ctx.save();
+			ctx.translate(p.cx, p.cy);
+			ctx.rotate(p.rot);
+			ctx.rect(-p.halfLength, -p.halfWidth, p.halfLength * 2, p.halfWidth * 2);
+			ctx.restore();
+		} else if (p.kind === "stroke") {
+			const first = p.points[0];
+			if (first) {
+				ctx.moveTo(first.x, first.y);
+				for (let i = 1; i < p.points.length; i++) {
+					const q = p.points[i] as { x: number; y: number };
+					ctx.lineTo(q.x, q.y);
+				}
+			}
+		} else if (p.kind === "polygon") {
+			tracePolyPath(ctx, p.points);
+		} else if (p.kind === "text") {
+			// In-progress label: the typed text, or a caret while empty.
+			ctx.save();
+			ctx.shadowColor = "transparent";
+			ctx.shadowBlur = 0;
+			ctx.fillStyle = LABEL_COLOR;
+			ctx.font = labelFont(zoom);
+			if (p.text.length > 0) {
+				ctx.fillText(p.text, p.x, p.y);
+			} else {
+				const size = effectiveLabelFontSize(zoom);
+				ctx.fillStyle = ACCENT_COLOR;
+				ctx.fillRect(p.x, p.y - size * 0.85, LABEL_CARET_WIDTH_PX / zoom, size);
+			}
+			ctx.restore();
+			return;
+		} else if (p.kind === "rect") {
 			ctx.rect(
 				p.cx - p.halfWidth,
 				p.cy - p.halfHeight,
@@ -278,6 +423,13 @@ export function createRenderer(
 		ctx.stroke();
 		ctx.shadowColor = "transparent";
 		ctx.shadowBlur = 0;
+		if (p.kind === "polygon" && p.closable) {
+			// Accent dot on the first vertex: the close-click target.
+			ctx.fillStyle = ACCENT_COLOR;
+			ctx.beginPath();
+			ctx.arc(p.first.x, p.first.y, 4 / zoom, 0, Math.PI * 2);
+			ctx.fill();
+		}
 	}
 
 	let lastFrameTime = 0;

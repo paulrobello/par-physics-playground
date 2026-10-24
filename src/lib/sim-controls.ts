@@ -41,6 +41,7 @@ export interface SimControlsDeps {
 	clock: SimClock;
 	/** Clears dynamic bodies; the caller cancels any active drag first. */
 	onReset: () => void;
+	isEditingText?: () => boolean;
 }
 
 /** Attaches click + keyboard wiring to the top-bar cluster. Returns a cleanup. */
@@ -80,6 +81,7 @@ export function attachSimControls(deps: SimControlsDeps): () => void {
 	resetBtn.addEventListener("click", reset);
 
 	const onKeyDown = (event: KeyboardEvent): void => {
+		if (deps.isEditingText?.() || event.defaultPrevented) return;
 		if (event.ctrlKey || event.metaKey || event.altKey) return;
 		// Text-entry targets keep their keys (matches camera/tool controls).
 		if (

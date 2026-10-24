@@ -1,25 +1,145 @@
 /**
- * Tool system, DOM-free: tool identity, drag-to-size math, body picking, and
- * the tool state machine that turns pointer events into spawn/drag commands.
- * All geometry is in world coordinates (y-down world per src/lib/world.ts).
- * DOM wiring lives in src/lib/interaction.ts.
+ * Tool system, DOM-free: tool identity, drag-to-size math, polygon/line
+ * placement state machines, body picking, selection-set state (click,
+ * shift-toggle, rubber-band), and the tool state machine that turns pointer
+ * events into spawn/move/rotate/delete/duplicate commands. All geometry is in
+ * world coordinates (y-down world per src/lib/world.ts). DOM wiring lives in
+ * src/lib/interaction.ts.
  */
-import type { BodyShape } from "./world";
+import type { BodyShape } from "./document";
+import {
+	decideFreehand,
+	type FreehandDecision,
+	FreehandStrokeBuilder,
+} from "./freehand";
+import { pointInPolygon, type Vec2 } from "./triangulate";
 
-export type ToolId = "select" | "box" | "circle";
+export type ToolId =
+	| "select"
+	| "box"
+	| "circle"
+	| "polygon"
+	| "line"
+	| "freehand"
+	| "text";
 
-/** Keyboard shortcuts: V select, B box, C circle. */
+/** All tool ids, for DOM validation of toolbar buttons. */
+export const TOOL_IDS: readonly ToolId[] = [
+	"select",
+	"box",
+	"circle",
+	"polygon",
+	"line",
+	"freehand",
+	"text",
+];
+
+export function isToolId(value: string): value is ToolId {
+	return (TOOL_IDS as readonly string[]).includes(value);
+}
+
+/**
+ * Keyboard shortcuts: V select, B box, C circle, G polygon, L line, F
+ * freehand, T text. (P would be the natural polygon key but belongs to the sim
+ * pause toggle, so polygon takes G — as in polyGon.)
+ */
 export const TOOL_KEYS: Record<string, ToolId> = {
 	KeyV: "select",
 	KeyB: "box",
 	KeyC: "circle",
+	KeyG: "polygon",
+	KeyL: "line",
+	KeyF: "freehand",
+	KeyT: "text",
 };
+
+/**
+ * Base label text size in world units (the text tool's font at high zoom).
+ * The on-screen size is clamped to a readable window by
+ * {@link effectiveLabelFontSize} — the ONE font-size computation shared by
+ * the renderer, the picker, and the selection outline, so what you see is
+ * exactly what you can click at every zoom.
+ */
+export const LABEL_FONT_SIZE = 1.5;
+/** Label font screen-size clamp (CSS px): smallest readable, largest sane. */
+export const LABEL_MIN_PX = 10;
+export const LABEL_MAX_PX = 48;
+/** Estimated average glyph width as a fraction of the font size (system-ui). */
+export const LABEL_CHAR_WIDTH = 0.6;
+
+/**
+ * The label font size in world units at the given zoom: the on-screen height
+ * of the text stays within [LABEL_MIN_PX, LABEL_MAX_PX] CSS pixels. Zooming
+ * out grows the world-unit size (labels never become unreadably small);
+ * zooming in shrinks it (labels never balloon).
+ */
+export function effectiveLabelFontSize(zoom: number): number {
+	return Math.min(
+		Math.max(LABEL_FONT_SIZE, LABEL_MIN_PX / zoom),
+		LABEL_MAX_PX / zoom,
+	);
+}
 
 /**
  * Smallest allowed half-size: a click without a drag still commits a shape of
  * at least this half-extent (1x1 box / r=0.5 circle) instead of a degenerate one.
  */
 export const MIN_SHAPE_HALF_SIZE = 0.5;
+
+/**
+ * Line/beam thickness: the beam is a thin rotated box (half-extent across the
+ * segment). Chosen over a capsule for an exact rectangular silhouette and a
+ * cheap collider; the width is fixed until a properties panel exists.
+ */
+export const BEAM_HALF_WIDTH = 0.25;
+
+/**
+ * Segment drag vs. two-click threshold: a release within this distance of the
+ * press keeps the line tool armed for a second click (two-click drawing).
+ */
+export const SEGMENT_CLICK_EPSILON = 0.05;
+
+/** Click within this world distance of the first vertex closes a polygon. */
+export const POLYGON_CLOSE_RADIUS = 0.75;
+
+/** How the inline label edit handles a key. */
+export type EditKeyAction = "commit" | "backspace" | "insert" | "ignore";
+
+/**
+ * Classify a keydown for the inline label edit (DOM-free). Modifier combos
+ * (Cmd/Ctrl/Alt + anything) are "ignore" — the edit must neither commit nor
+ * undo on shortcuts like Cmd+Z, nor type the bare letter into the text.
+ */
+export function classifyEditKey(event: {
+	readonly code: string;
+	readonly key: string;
+	readonly ctrlKey: boolean;
+	readonly metaKey: boolean;
+	readonly altKey: boolean;
+}): EditKeyAction {
+	if (event.ctrlKey || event.metaKey || event.altKey) return "ignore";
+	if (event.code === "Enter" || event.code === "Escape") return "commit";
+	if (event.code === "Backspace") return "backspace";
+	if (event.key.length === 1) return "insert";
+	return "ignore";
+}
+
+/**
+ * Duplicate offset copy placement, world units: right and up (y-down world).
+ * A fixed delta so repeated duplicates tile diagonally.
+ */
+export const DUPLICATE_OFFSET = { x: 1, y: -1 } as const;
+
+/**
+ * Rotate sensitivity for R-drag: radians of rotation per world unit of
+ * vertical pointer travel. Dragging down (y-down world) rotates clockwise.
+ */
+export const ROTATE_RADIANS_PER_UNIT = 0.01;
+
+/** Angle swept by a vertical drag from `startY` to `curY`. */
+export function angleFromVerticalDrag(startY: number, curY: number): number {
+	return (curY - startY) * ROTATE_RADIANS_PER_UNIT;
+}
 
 /** Axis-aligned drag rectangle from two corners, clamped to the minimum size. */
 export interface DragRect {
@@ -63,7 +183,77 @@ export function circleFromDrag(
 	};
 }
 
-/** One body snapshot for picking. */
+/**
+ * Snap the segment's far end so its direction is the nearest multiple of 45°
+ * (horizontal, vertical, or diagonal — the line-run shift-constraint). Length
+ * is preserved; the start point stays put.
+ */
+export function constrainSegment(
+	ax: number,
+	ay: number,
+	bx: number,
+	by: number,
+): Vec2 {
+	const dx = bx - ax;
+	const dy = by - ay;
+	if (dx === 0 && dy === 0) return { x: bx, y: by };
+	const length = Math.hypot(dx, dy);
+	const step = Math.PI / 4;
+	const snapped = Math.round(Math.atan2(dy, dx) / step) * step;
+	return {
+		x: ax + length * Math.cos(snapped),
+		y: ay + length * Math.sin(snapped),
+	};
+}
+
+/** Rotated thin-box geometry for a straight segment (the line/beam tool). */
+export interface BeamGeom {
+	readonly cx: number;
+	readonly cy: number;
+	readonly rot: number;
+	readonly halfLength: number;
+	readonly halfWidth: number;
+}
+
+/** Live preview geometry for whichever draw tool is active. */
+export type DrawPreview =
+	| {
+			kind: "rect";
+			cx: number;
+			cy: number;
+			halfWidth: number;
+			halfHeight: number;
+	  }
+	| { kind: "circle"; cx: number; cy: number; radius: number }
+	| ({ kind: "line" } & BeamGeom)
+	| {
+			kind: "polygon";
+			/** Placed vertices plus the current cursor position as the last one. */
+			points: Vec2[];
+			/** The first vertex (the close-click target / dot the renderer draws). */
+			first: Vec2;
+			closable: boolean;
+	  }
+	| { kind: "stroke"; points: readonly Vec2[] }
+	| { kind: "text"; x: number; y: number; text: string };
+
+/** Beam centered on the segment midpoint, oriented along it, min length clamped. */
+export function beamFromSegment(
+	ax: number,
+	ay: number,
+	bx: number,
+	by: number,
+): BeamGeom {
+	return {
+		cx: (ax + bx) / 2,
+		cy: (ay + by) / 2,
+		rot: Math.atan2(by - ay, bx - ax),
+		halfLength: Math.max(Math.hypot(bx - ax, by - ay) / 2, MIN_SHAPE_HALF_SIZE),
+		halfWidth: BEAM_HALF_WIDTH,
+	};
+}
+
+/** One body snapshot for picking and rubber-band selection. */
 export interface PickableBody {
 	readonly id: string;
 	readonly shape: BodyShape;
@@ -74,8 +264,9 @@ export interface PickableBody {
 
 /**
  * Topmost body containing the world point, or undefined. Bodies are tested
- * last-to-first so later entries (drawn on top, spawned later) win. Circles
- * and boxes use exact shape tests; boxes account for their rotation.
+ * last-to-first so later entries (drawn on top, spawned later) win. Circles,
+ * boxes, and polygons use exact shape tests; boxes and polygons account for
+ * their rotation.
  */
 export function pickBody(
 	bodies: readonly PickableBody[],
@@ -89,6 +280,15 @@ export function pickBody(
 			const dx = wx - b.x;
 			const dy = wy - b.y;
 			if (dx * dx + dy * dy <= b.shape.radius * b.shape.radius) return b.id;
+		} else if (b.shape.kind === "polygon") {
+			const cos = Math.cos(-b.rot);
+			const sin = Math.sin(-b.rot);
+			const dx = wx - b.x;
+			const dy = wy - b.y;
+			if (
+				pointInPolygon(dx * cos - dy * sin, dx * sin + dy * cos, b.shape.points)
+			)
+				return b.id;
 		} else {
 			const cos = Math.cos(-b.rot);
 			const sin = Math.sin(-b.rot);
@@ -107,15 +307,150 @@ export function pickBody(
 	return undefined;
 }
 
+/**
+ * Axis-aligned hit box for a label (world units). The label anchors at the
+ * left end of its baseline, so the box runs from the anchor rightward and
+ * mostly above it (descenders reach a little below). Uses the estimated
+ * character width — the DOM-free stand-in for canvas text metrics; the same
+ * estimate draws the selection outline, so picking and the outline agree.
+ */
+export function labelBounds(
+	x: number,
+	y: number,
+	text: string,
+	fontSize = LABEL_FONT_SIZE,
+): { x0: number; y0: number; x1: number; y1: number } {
+	const width = Math.max(text.length * LABEL_CHAR_WIDTH * fontSize, fontSize);
+	return {
+		x0: x,
+		y0: y - fontSize * 0.85,
+		x1: x + width,
+		y1: y + fontSize * 0.3,
+	};
+}
+
+/**
+ * Topmost label whose hit box contains the world point, or undefined. Tested
+ * last-to-first like pickBody; labels always sit above bodies in the pick
+ * order (callers combine `pickLabel(...) ?? pickBody(...)`). `zoom` sizes the
+ * hit box to the font the renderer actually draws at that zoom.
+ */
+export function pickLabel(
+	labels: readonly {
+		readonly id: string;
+		readonly x: number;
+		readonly y: number;
+		readonly text: string;
+		readonly rot?: number;
+	}[],
+	wx: number,
+	wy: number,
+	zoom = 1,
+): string | undefined {
+	const fontSize = effectiveLabelFontSize(zoom);
+	for (let i = labels.length - 1; i >= 0; i--) {
+		const label = labels[i];
+		if (!label) continue;
+		const b = labelBounds(0, 0, label.text, fontSize);
+		const angle = -(label.rot ?? 0);
+		const dx = wx - label.x;
+		const dy = wy - label.y;
+		const x = dx * Math.cos(angle) - dy * Math.sin(angle);
+		const y = dx * Math.sin(angle) + dy * Math.cos(angle);
+		if (x >= b.x0 && x <= b.x1 && y >= b.y0 && y <= b.y1) return label.id;
+	}
+	return undefined;
+}
+
+/**
+ * Unclamped rectangle from two corners — the rubber-band selection frame (a
+ * near-zero click rectangle legitimately selects nothing, unlike draw sizing
+ * which clamps to a minimum shape).
+ */
+export function rubberRect(
+	ax: number,
+	ay: number,
+	bx: number,
+	by: number,
+): DragRect {
+	return {
+		cx: (ax + bx) / 2,
+		cy: (ay + by) / 2,
+		halfWidth: Math.abs(bx - ax) / 2,
+		halfHeight: Math.abs(by - ay) / 2,
+	};
+}
+
+/** Bodies whose centre lies inside the rubber-band rectangle, in pick order. */
+export function bodiesInRect(
+	bodies: readonly { id: string; x: number; y: number }[],
+	rect: DragRect,
+): string[] {
+	const hits: string[] = [];
+	for (const b of bodies) {
+		if (
+			Math.abs(b.x - rect.cx) <= rect.halfWidth &&
+			Math.abs(b.y - rect.cy) <= rect.halfHeight
+		) {
+			hits.push(b.id);
+		}
+	}
+	return hits;
+}
+
+/** Pointer-event modifiers the session cares about (DOM layer extracts them). */
+export interface PointerMods {
+	/** Shift-held: click toggles membership, rubber-band adds to the selection. */
+	readonly shift?: boolean;
+	/** R-held with the select tool: a press on the selection rotates it. */
+	readonly rotate?: boolean;
+}
+
 /** Events the session emits; the interaction layer forwards them to the world. */
 export interface ToolSessionEvents {
+	onBeginAction?(): void;
+	onCancelAction?(): void;
+	labelAt?(id: string): { x: number; y: number; text: string } | undefined;
 	/** A drag-to-size shape was committed on release. */
 	onSpawnBox(shape: DragRect): void;
 	onSpawnCircle(shape: { cx: number; cy: number; radius: number }): void;
+	/** A closed polygon was committed: absolute-space vertices, ≥3 points. */
+	onSpawnPolygon(points: readonly Vec2[]): void;
+	/** A straight beam was committed as rotated thin-box geometry. */
+	onSpawnLine(beam: BeamGeom): void;
+	/**
+	 * A freehand stroke was released: the cleanup/snap decision (primitive
+	 * snap, freeform polygon, open-stroke chain, or nothing) to commit.
+	 */
+	onSpawnFreehand(result: FreehandDecision): void;
+	/**
+	 * A click with the text tool placed a new label: create the (empty) label
+	 * entity and return its id — the session edits it in place until the
+	 * inline edit commits.
+	 */
+	onCreateLabel(pos: { x: number; y: number }): string;
+	/**
+	 * The inline label edit finished: store `text` on the label. An empty
+	 * (all-whitespace) text was already discarded by the session.
+	 */
+	onCommitLabel(id: string, text: string): void;
 	/** A body was grabbed with the select tool; `grab` is the world grab point. */
 	onDragStart(id: string, grab: { x: number; y: number }): void;
 	onDragMove(target: { x: number; y: number }): void;
 	onDragEnd(): void;
+	/** A rotate gesture started on the selection (base rotations captured now). */
+	onRotateStart(): void;
+	/** Rotation delta from the rotate gesture's start angle (cumulative). */
+	onRotate(delta: number): void;
+	/** The rotate gesture ended (release, cancel, or tool switch). */
+	onRotateEnd(): void;
+	/** The selection set was deleted; ids are the removed bodies. */
+	onDelete(ids: readonly string[]): void;
+	/**
+	 * Offset copies were created; returns the new ids aligned with `ids`
+	 * (undefined when a body could not be duplicated).
+	 */
+	onDuplicate(ids: readonly string[]): (string | undefined)[];
 }
 
 type Phase =
@@ -127,42 +462,165 @@ type Phase =
 			curX: number;
 			curY: number;
 	  }
-	| { readonly kind: "dragging"; id: string };
+	| {
+			readonly kind: "line-drawing";
+			startX: number;
+			startY: number;
+			curX: number;
+			curY: number;
+			shift: boolean;
+	  }
+	| {
+			readonly kind: "polygon-place";
+			/** Committed vertices so far (the first one closes on re-click). */
+			points: Vec2[];
+			curX: number;
+			curY: number;
+	  }
+	| { readonly kind: "freehand"; readonly stroke: FreehandStrokeBuilder }
+	| {
+			readonly kind: "text-editing";
+			readonly id: string;
+			readonly anchorX: number;
+			readonly anchorY: number;
+			text: string;
+	  }
+	| { readonly kind: "dragging"; id: string }
+	| {
+			readonly kind: "rubberband";
+			startX: number;
+			startY: number;
+			curX: number;
+			curY: number;
+			additive: boolean;
+	  }
+	| { readonly kind: "rotating"; startY: number };
 
 /**
- * Tool state machine. Feed it world-space pointer events; it emits spawn and
- * drag commands. `pick` resolves hover and press against the live body list.
+ * Tool state machine. Feed it world-space pointer events; it emits spawn,
+ * drag, rotate, delete, and duplicate commands. `pick` resolves hover and
+ * press against the live body list; `pickRect` resolves rubber-band
+ * selection against it (defaults to selecting nothing).
  */
 export class ToolSession {
 	tool: ToolId = "select";
+	/**
+	 * Static mode: while on, box/circle/polygon/line/freehand spawns are
+	 * committed with `isStatic: true` (terrain — infinite mass). A spawn
+	 * property, not a tool, so it composes with any draw tool.
+	 */
+	staticMode = false;
 	/** Body under the pointer (hover), updated by pointerMove when idle. */
 	hoverId: string | undefined;
-	/** Currently selected body. */
-	selectedId: string | undefined;
+	/** Currently selected bodies, in no particular order. */
+	selectedIds: Set<string> = new Set();
 
 	private phase: Phase = { kind: "idle" };
 
 	constructor(
 		private readonly events: ToolSessionEvents,
 		private readonly pick: (wx: number, wy: number) => string | undefined,
+		private readonly pickRect?: (rect: DragRect) => readonly string[],
 	) {}
 
 	/** The in-progress drawing preview geometry, or null when not drawing. */
-	preview(): DragRect | { cx: number; cy: number; radius: number } | null {
-		if (this.phase.kind !== "drawing") return null;
-		return this.tool === "box"
-			? rectFromDrag(
+	preview(): DrawPreview | null {
+		if (this.phase.kind === "drawing") {
+			return this.tool === "box"
+				? {
+						kind: "rect",
+						...rectFromDrag(
+							this.phase.startX,
+							this.phase.startY,
+							this.phase.curX,
+							this.phase.curY,
+						),
+					}
+				: {
+						kind: "circle",
+						...circleFromDrag(
+							this.phase.startX,
+							this.phase.startY,
+							this.phase.curX,
+							this.phase.curY,
+						),
+					};
+		}
+		if (this.phase.kind === "line-drawing") {
+			return {
+				kind: "line",
+				...this.lineGeom(
 					this.phase.startX,
 					this.phase.startY,
 					this.phase.curX,
 					this.phase.curY,
-				)
-			: circleFromDrag(
-					this.phase.startX,
-					this.phase.startY,
-					this.phase.curX,
-					this.phase.curY,
-				);
+					this.phase.shift,
+				),
+			};
+		}
+		if (this.phase.kind === "freehand") {
+			return { kind: "stroke", points: this.phase.stroke.points };
+		}
+		if (this.phase.kind === "polygon-place") {
+			const first = this.phase.points[0] as Vec2;
+			const points = [
+				...this.phase.points,
+				{ x: this.phase.curX, y: this.phase.curY },
+			];
+			const dx = this.phase.curX - first.x;
+			const dy = this.phase.curY - first.y;
+			return {
+				kind: "polygon",
+				points,
+				first,
+				closable:
+					this.phase.points.length >= 3 &&
+					dx * dx + dy * dy <= POLYGON_CLOSE_RADIUS * POLYGON_CLOSE_RADIUS,
+			};
+		}
+		if (this.phase.kind === "text-editing") {
+			return {
+				kind: "text",
+				x: this.phase.anchorX,
+				y: this.phase.anchorY,
+				text: this.phase.text,
+			};
+		}
+		return null;
+	}
+
+	/** Shift-constrained beam geometry for the line tool's current segment. */
+	private lineGeom(
+		ax: number,
+		ay: number,
+		bx: number,
+		by: number,
+		shift: boolean,
+	): BeamGeom {
+		const end = shift ? constrainSegment(ax, ay, bx, by) : { x: bx, y: by };
+		return beamFromSegment(ax, ay, end.x, end.y);
+	}
+
+	/** Commit a beam (drag release or the second click of the two-click flow). */
+	private spawnLine(
+		ax: number,
+		ay: number,
+		bx: number,
+		by: number,
+		shift: boolean,
+	): void {
+		this.events.onSpawnLine(this.lineGeom(ax, ay, bx, by, shift));
+	}
+
+	/** The in-progress rubber-band rectangle, or null when not rubber-banding. */
+	rubberBand(): DragRect | null {
+		if (this.phase.kind !== "rubberband") return null;
+		return rubberRect(
+			this.phase.startX,
+			this.phase.startY,
+			this.phase.curX,
+			this.phase.curY,
+		);
 	}
 
 	setTool(tool: ToolId): void {
@@ -170,43 +628,248 @@ export class ToolSession {
 		// A tool change terminates the in-progress gesture outright: a drag
 		// releases its body (like pointerUp), a drawing is discarded without
 		// committing, and the phase returns to idle so the release that follows
-		// the switch is a no-op.
+		// the switch is a no-op. The selection survives a tool switch — it is
+		// the edit target, not part of the gesture. An in-progress label edit
+		// commits instead: typed text is not a gesture to discard.
 		if (this.phase.kind === "dragging") this.events.onDragEnd();
+		if (this.phase.kind === "rotating") this.events.onRotateEnd();
+		if (this.phase.kind === "text-editing") this.commitText();
+		this.events.onCancelAction?.();
 		this.phase = { kind: "idle" };
 		this.tool = tool;
 	}
 
-	/** Cancel drawing or drag; Escape with nothing in progress clears selection. */
+	/**
+	 * Cancel drawing/drag/rotate; Escape with nothing in progress clears
+	 * selection. An in-progress label edit commits (Escape commits per the
+	 * text tool's contract); only an all-whitespace label is discarded.
+	 */
 	cancel(): void {
 		if (this.phase.kind === "dragging") this.events.onDragEnd();
-		const wasDragging = this.phase.kind === "dragging";
+		if (this.phase.kind === "rotating") this.events.onRotateEnd();
+		if (this.phase.kind === "text-editing") this.commitText();
+		this.events.onCancelAction?.();
+		const wasGesture = this.phase.kind !== "idle";
 		this.phase = { kind: "idle" };
-		if (!wasDragging) this.selectedId = undefined;
+		if (!wasGesture) this.selectedIds.clear();
 	}
 
-	pointerDown(wx: number, wy: number): void {
-		if (this.phase.kind !== "idle") return;
-		if (this.tool === "select") {
-			const hit = this.pick(wx, wy);
-			this.selectedId = hit;
-			if (hit) {
-				this.phase = { kind: "dragging", id: hit };
-				this.events.onDragStart(hit, { x: wx, y: wy });
-			}
+	/**
+	 * Close the in-progress polygon (Enter or the close click): false when no
+	 * polygon placement is active or it has fewer than three vertices.
+	 */
+	closePolygon(): boolean {
+		if (this.phase.kind !== "polygon-place") return false;
+		if (this.phase.points.length < 3) return false;
+		const { points } = this.phase;
+		this.phase = { kind: "idle" };
+		this.events.onSpawnPolygon(points);
+		return true;
+	}
+
+	/** True while a text-tool inline label edit is in progress. */
+	isEditingText(): boolean {
+		return this.phase.kind === "text-editing";
+	}
+
+	/** Append a printable character to the in-progress label (editing only). */
+	editTextKey(key: string): void {
+		if (this.phase.kind !== "text-editing") return;
+		this.phase = { ...this.phase, text: this.phase.text + key };
+	}
+
+	/** Delete the last character of the in-progress label (editing only). */
+	editTextBackspace(): void {
+		if (this.phase.kind !== "text-editing") return;
+		this.phase = { ...this.phase, text: this.phase.text.slice(0, -1) };
+	}
+
+	/**
+	 * Commit the inline label edit (Enter, Escape, a tool change, any gesture
+	 * interruption): false when not editing. An all-whitespace text discards
+	 * the label entirely — empty labels never enter the document.
+	 */
+	commitText(): boolean {
+		if (this.phase.kind !== "text-editing") return false;
+		const { id, text } = this.phase;
+		this.phase = { kind: "idle" };
+		if (text.trim() === "") {
+			this.events.onDelete([id]);
+		} else {
+			this.events.onCommitLabel(id, text);
+		}
+		return true;
+	}
+
+	/** Delete the selection; false when nothing is selected. */
+	requestDelete(): boolean {
+		if (this.selectedIds.size === 0) return false;
+		if (this.phase.kind === "dragging" || this.phase.kind === "rotating")
+			this.cancel();
+		const ids = [...this.selectedIds];
+		this.selectedIds.clear();
+		this.events.onDelete(ids);
+		return true;
+	}
+
+	/** Offset-duplicate the selection; the copies become the selection. */
+	requestDuplicate(): boolean {
+		if (this.selectedIds.size === 0) return false;
+		const newIds = this.events.onDuplicate([...this.selectedIds]);
+		this.selectedIds = new Set(
+			newIds.filter((id): id is string => id !== undefined),
+		);
+		return true;
+	}
+
+	pointerDown(wx: number, wy: number, mods: PointerMods = {}): void {
+		// A click during an in-progress label edit commits that label first
+		// (the click itself is not consumed — with the text tool it starts the
+		// next label, with any other tool it draws/selects).
+		if (this.phase.kind === "text-editing") this.commitText();
+		if (this.phase.kind === "line-drawing") {
+			// Two-click mode: this press is the segment's far end → commit.
+			const { startX, startY, shift } = this.phase;
+			this.phase = { kind: "idle" };
+			this.spawnLine(startX, startY, wx, wy, shift || mods.shift === true);
 			return;
 		}
-		this.phase = {
-			kind: "drawing",
-			startX: wx,
-			startY: wy,
-			curX: wx,
-			curY: wy,
-		};
+		if (this.phase.kind === "polygon-place") {
+			const first = this.phase.points[0] as Vec2;
+			const dx = wx - first.x;
+			const dy = wy - first.y;
+			if (
+				this.phase.points.length >= 3 &&
+				dx * dx + dy * dy <= POLYGON_CLOSE_RADIUS * POLYGON_CLOSE_RADIUS
+			) {
+				this.closePolygon();
+				return;
+			}
+			this.phase = {
+				...this.phase,
+				points: [...this.phase.points, { x: wx, y: wy }],
+				curX: wx,
+				curY: wy,
+			};
+			return;
+		}
+		if (this.phase.kind !== "idle") return;
+		if (this.tool !== "select") this.events.onBeginAction?.();
+		if (this.tool === "line") {
+			this.phase = {
+				kind: "line-drawing",
+				startX: wx,
+				startY: wy,
+				curX: wx,
+				curY: wy,
+				shift: mods.shift === true,
+			};
+			return;
+		}
+		if (this.tool === "polygon") {
+			this.phase = {
+				kind: "polygon-place",
+				points: [{ x: wx, y: wy }],
+				curX: wx,
+				curY: wy,
+			};
+			return;
+		}
+		if (this.tool === "freehand") {
+			const stroke = new FreehandStrokeBuilder();
+			stroke.add(wx, wy);
+			this.phase = { kind: "freehand", stroke };
+			return;
+		}
+		if (this.tool === "text") {
+			this.events.onBeginAction?.();
+			const hit = this.pick(wx, wy);
+			const label = hit ? this.events.labelAt?.(hit) : undefined;
+			const id =
+				label && hit ? hit : this.events.onCreateLabel({ x: wx, y: wy });
+			this.phase = {
+				kind: "text-editing",
+				id,
+				anchorX: label?.x ?? wx,
+				anchorY: label?.y ?? wy,
+				text: label?.text ?? "",
+			};
+			return;
+		}
+		if (this.tool !== "select") {
+			this.phase = {
+				kind: "drawing",
+				startX: wx,
+				startY: wy,
+				curX: wx,
+				curY: wy,
+			};
+			return;
+		}
+		const hit = this.pick(wx, wy);
+		if (hit && mods.rotate) {
+			// R-drag rotates the selection; an unselected body joins it first.
+			if (!this.selectedIds.has(hit)) this.selectedIds = new Set([hit]);
+			this.phase = { kind: "rotating", startY: wy };
+			this.events.onRotateStart();
+			return;
+		}
+		if (hit && mods.shift) {
+			// Shift-click toggles membership, either direction, and never starts
+			// a drag — the selected set is moved by a plain press on a member.
+			if (this.selectedIds.has(hit)) {
+				this.selectedIds.delete(hit);
+			} else {
+				this.selectedIds.add(hit);
+			}
+			return;
+		} else if (hit) {
+			if (!this.selectedIds.has(hit)) this.selectedIds = new Set([hit]);
+		} else {
+			// Empty space: rubber-band (additive under shift), not deselect yet —
+			// a zero-size band (plain click) deselects on release.
+			this.phase = {
+				kind: "rubberband",
+				startX: wx,
+				startY: wy,
+				curX: wx,
+				curY: wy,
+				additive: mods.shift === true,
+			};
+			return;
+		}
+		this.phase = { kind: "dragging", id: hit };
+		this.events.onDragStart(hit, { x: wx, y: wy });
 	}
 
-	pointerMove(wx: number, wy: number): void {
+	pointerMove(wx: number, wy: number, mods: { shift?: boolean } = {}): void {
 		if (this.phase.kind === "drawing") {
 			this.phase = { ...this.phase, curX: wx, curY: wy };
+			return;
+		}
+		if (this.phase.kind === "line-drawing") {
+			this.phase = {
+				...this.phase,
+				curX: wx,
+				curY: wy,
+				shift: mods.shift ?? this.phase.shift,
+			};
+			return;
+		}
+		if (this.phase.kind === "polygon-place") {
+			this.phase = { ...this.phase, curX: wx, curY: wy };
+			return;
+		}
+		if (this.phase.kind === "freehand") {
+			this.phase.stroke.add(wx, wy);
+			return;
+		}
+		if (this.phase.kind === "rubberband") {
+			this.phase = { ...this.phase, curX: wx, curY: wy };
+			return;
+		}
+		if (this.phase.kind === "rotating") {
+			this.events.onRotate(angleFromVerticalDrag(this.phase.startY, wy));
 			return;
 		}
 		if (this.phase.kind === "dragging") {
@@ -217,6 +880,23 @@ export class ToolSession {
 	}
 
 	pointerUp(): void {
+		if (this.phase.kind === "freehand") {
+			const decision = decideFreehand(this.phase.stroke.points);
+			this.phase = { kind: "idle" };
+			if (decision.kind !== "none") this.events.onSpawnFreehand(decision);
+			else this.events.onCancelAction?.();
+			return;
+		}
+		if (this.phase.kind === "line-drawing") {
+			const { startX, startY, curX, curY, shift } = this.phase;
+			// A real drag commits on release; a near-stationary release leaves
+			// the tool armed for the two-click flow's second press.
+			if (Math.hypot(curX - startX, curY - startY) > SEGMENT_CLICK_EPSILON) {
+				this.phase = { kind: "idle" };
+				this.spawnLine(startX, startY, curX, curY, shift);
+			}
+			return;
+		}
 		if (this.phase.kind === "drawing") {
 			const { startX, startY, curX, curY } = this.phase;
 			this.phase = { kind: "idle" };
@@ -225,6 +905,21 @@ export class ToolSession {
 			} else {
 				this.events.onSpawnCircle(circleFromDrag(startX, startY, curX, curY));
 			}
+			return;
+		}
+		if (this.phase.kind === "rubberband") {
+			const { startX, startY, curX, curY, additive } = this.phase;
+			this.phase = { kind: "idle" };
+			const rect = rubberRect(startX, startY, curX, curY);
+			const hits = this.pickRect?.(rect) ?? [];
+			this.selectedIds = additive
+				? new Set([...this.selectedIds, ...hits])
+				: new Set(hits);
+			return;
+		}
+		if (this.phase.kind === "rotating") {
+			this.phase = { kind: "idle" };
+			this.events.onRotateEnd();
 			return;
 		}
 		if (this.phase.kind === "dragging") {

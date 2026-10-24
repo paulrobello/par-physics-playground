@@ -25,6 +25,7 @@ export function attachCameraControls(
 	canvas: HTMLCanvasElement,
 	camera: Camera,
 	getRestingCursor?: RestingCursorFn,
+	isEditingText: () => boolean = () => false,
 ): () => void {
 	let spaceHeld = false;
 	let dragging = false;
@@ -46,6 +47,7 @@ export function attachCameraControls(
 				null);
 
 	const onKeyDown = (event: KeyboardEvent): void => {
+		if (isEditingText() || event.defaultPrevented) return;
 		if (
 			event.code !== "Space" ||
 			event.repeat ||

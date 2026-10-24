@@ -6,7 +6,7 @@ import { KILL_THRESHOLD_Y, PhysicsWorld } from "../../src/lib/world";
 /**
  * F5 regression: kill-threshold culling must invalidate the drag joint the
  * interaction layer still holds. A culled body's joints are destroyed with it
- * in Rapier, so the world exposes an onCull seam and createToolEvents drops
+ * in Rapier, so the world exposes an onRemove seam and createToolEvents drops
  * the stale joint handle; the pending pointer move/release then become no-ops
  * and a fresh grab works. Runs against a real Rapier world (loads in bun).
  */

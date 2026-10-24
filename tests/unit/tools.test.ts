@@ -1,6 +1,9 @@
 import { describe, expect, test } from "bun:test";
 import {
+	BEAM_HALF_WIDTH,
+	beamFromSegment,
 	circleFromDrag,
+	constrainSegment,
 	type PickableBody,
 	pickBody,
 	rectFromDrag,
@@ -117,6 +120,22 @@ function makeSession(pick: (x: number, y: number) => string | undefined): {
 		onSpawnCircle(shape) {
 			log.push(["circle", shape]);
 		},
+		onSpawnPolygon(points) {
+			log.push(["polygon", points]);
+		},
+		onSpawnLine(beam) {
+			log.push(["line", beam]);
+		},
+		onSpawnFreehand(result) {
+			log.push(["freehand", result.kind]);
+		},
+		onCreateLabel(pos) {
+			log.push(["create-label", pos]);
+			return `label-${log.length}`;
+		},
+		onCommitLabel(id, text) {
+			log.push(["commit-label", { id, text }]);
+		},
 		onDragStart(id, grab) {
 			log.push(["dragStart", { id, grab }]);
 		},
@@ -125,6 +144,22 @@ function makeSession(pick: (x: number, y: number) => string | undefined): {
 		},
 		onDragEnd() {
 			log.push(["dragEnd", null]);
+		},
+		onRotateStart() {
+			log.push(["rotateStart", null]);
+		},
+		onRotate(delta) {
+			log.push(["rotate", delta]);
+		},
+		onRotateEnd() {
+			log.push(["rotateEnd", null]);
+		},
+		onDelete(ids) {
+			log.push(["delete", ids]);
+		},
+		onDuplicate(ids) {
+			log.push(["duplicate", ids]);
+			return ids.map((id) => `copy-${id}`);
 		},
 	};
 	return { session: new ToolSession(events, pick), log };
@@ -137,6 +172,7 @@ describe("ToolSession — draw tools", () => {
 		session.pointerDown(0, -50);
 		session.pointerMove(80, -10);
 		expect(session.preview()).toEqual({
+			kind: "rect",
 			cx: 40,
 			cy: -30,
 			halfWidth: 40,
@@ -190,15 +226,17 @@ describe("ToolSession — select tool", () => {
 			["dragMove", { x: 20, y: 0 }],
 			["dragEnd", null],
 		]);
-		expect(session.selectedId).toBe("b1");
+		expect(session.selectedIds.has("b1")).toBe(true);
 	});
 
-	test("down on empty space deselects", () => {
+	test("down on empty space deselects on release (zero-size rubber-band)", () => {
 		const { session } = makeSession(pickHit);
 		session.pointerDown(5, 5);
 		session.pointerUp();
 		session.pointerDown(0, 0);
-		expect(session.selectedId).toBeUndefined();
+		expect(session.selectedIds.size).toBe(1); // still selected during the band
+		session.pointerUp();
+		expect(session.selectedIds.size).toBe(0);
 	});
 
 	test("Escape during a drag ends the drag but keeps the selection", () => {
@@ -209,7 +247,7 @@ describe("ToolSession — select tool", () => {
 			["dragStart", { id: "b1", grab: { x: 5, y: 5 } }],
 			["dragEnd", null],
 		]);
-		expect(session.selectedId).toBe("b1");
+		expect(session.selectedIds.has("b1")).toBe(true);
 	});
 
 	test("Escape when idle clears the selection", () => {
@@ -217,7 +255,7 @@ describe("ToolSession — select tool", () => {
 		session.pointerDown(5, 5);
 		session.pointerUp();
 		session.cancel();
-		expect(session.selectedId).toBeUndefined();
+		expect(session.selectedIds.size).toBe(0);
 	});
 
 	test("switching tool mid-drag releases the body and the release is a no-op", () => {
@@ -308,5 +346,307 @@ describe("ToolSession — cancel semantics (F6)", () => {
 		expect(log).toEqual([
 			["box", { cx: 30, cy: 30, halfWidth: 20, halfHeight: 20 }],
 		]);
+	});
+});
+
+describe("constrainSegment", () => {
+	test("keeps already-aligned directions", () => {
+		expect(constrainSegment(0, 0, 30, 0)).toEqual({ x: 30, y: 0 });
+		const vert = constrainSegment(0, 0, 0, -20);
+		expect(vert.x).toBeCloseTo(0, 9);
+		expect(vert.y).toBeCloseTo(-20, 9);
+		const diag = constrainSegment(0, 0, 10, 10);
+		expect(diag.x).toBeCloseTo(10, 9);
+		expect(diag.y).toBeCloseTo(10, 9);
+	});
+
+	test("snaps near-axis directions to horizontal with length preserved", () => {
+		const b = constrainSegment(0, 0, 30, 10);
+		const len = Math.hypot(b.x, b.y);
+		expect(b.y).toBe(0);
+		expect(len).toBeCloseTo(Math.hypot(30, 10), 9);
+	});
+
+	test("snaps 30 degrees to 45 degrees", () => {
+		const b = constrainSegment(
+			0,
+			0,
+			Math.cos(Math.PI / 6) * 10,
+			Math.sin(Math.PI / 6) * 10,
+		);
+		expect(b.x).toBeCloseTo(Math.cos(Math.PI / 4) * 10, 9);
+		expect(b.y).toBeCloseTo(Math.sin(Math.PI / 4) * 10, 9);
+	});
+
+	test("zero-length segment stays put", () => {
+		expect(constrainSegment(5, 5, 5, 5)).toEqual({ x: 5, y: 5 });
+	});
+});
+
+describe("beamFromSegment", () => {
+	test("centered on the midpoint, oriented along the segment", () => {
+		const beam = beamFromSegment(0, 0, 40, 20);
+		expect(beam.cx).toBe(20);
+		expect(beam.cy).toBe(10);
+		expect(beam.rot).toBeCloseTo(Math.atan2(20, 40), 9);
+		expect(beam.halfLength).toBeCloseTo(Math.hypot(40, 20) / 2, 9);
+		expect(beam.halfWidth).toBe(BEAM_HALF_WIDTH);
+	});
+
+	test("reversed direction gives the same box geometry", () => {
+		const a = beamFromSegment(0, 0, 40, 0);
+		const b = beamFromSegment(40, 0, 0, 0);
+		expect(a.cx).toBe(b.cx);
+		expect(a.cy).toBe(b.cy);
+		expect(Math.abs(a.rot - b.rot)).toBeCloseTo(Math.PI, 9);
+	});
+
+	test("a click (zero segment) clamps to the minimum half-length", () => {
+		const beam = beamFromSegment(3, 4, 3, 4);
+		expect(beam.cx).toBe(3);
+		expect(beam.cy).toBe(4);
+		expect(beam.halfLength).toBe(0.5);
+	});
+});
+
+describe("pickBody — polygon", () => {
+	const poly: PickableBody = {
+		id: "poly",
+		shape: {
+			kind: "polygon",
+			points: [
+				{ x: -2, y: -2 },
+				{ x: 2, y: -2 },
+				{ x: 2, y: 2 },
+				{ x: -2, y: 2 },
+			],
+		},
+		x: 10,
+		y: -10,
+		rot: 0,
+	};
+
+	test("hit inside and miss outside, unrotated", () => {
+		expect(pickBody([poly], 10, -10)).toBe("poly");
+		expect(pickBody([poly], 13, -10)).toBeUndefined();
+	});
+
+	test("rotated polygon: local-space test respects the rotation", () => {
+		const rotated: PickableBody = { ...poly, rot: Math.PI / 2 };
+		// Local point (2,0) maps to world (10,-12) under rot = π/2 in y-down.
+		expect(pickBody([rotated], 10, -12)).toBe("poly");
+		expect(pickBody([rotated], 13, -10)).toBeUndefined();
+	});
+
+	test("concave polygon: the notch misses", () => {
+		const lShape: PickableBody = {
+			id: "l",
+			shape: {
+				kind: "polygon",
+				points: [
+					{ x: 0, y: 0 },
+					{ x: 4, y: 0 },
+					{ x: 4, y: 1 },
+					{ x: 1, y: 1 },
+					{ x: 1, y: 4 },
+					{ x: 0, y: 4 },
+				],
+			},
+			x: 0,
+			y: 0,
+			rot: 0,
+		};
+		expect(pickBody([lShape], 0.5, 2)).toBe("l");
+		expect(pickBody([lShape], 3, 3)).toBeUndefined(); // inside the notch
+	});
+});
+
+describe("ToolSession — polygon tool", () => {
+	test("clicks place vertices; close click emits the polygon", () => {
+		const { session, log } = makeSession(() => undefined);
+		session.setTool("polygon");
+		session.pointerDown(0, 0);
+		session.pointerUp();
+		session.pointerDown(50, 0);
+		session.pointerUp();
+		session.pointerMove(25, -20);
+		const pv = session.preview();
+		if (!pv || pv.kind !== "polygon")
+			throw new Error("expected polygon preview");
+		expect(pv.points).toHaveLength(3);
+		expect(pv.closable).toBe(false);
+		session.pointerDown(25, -20);
+		session.pointerUp();
+		expect(session.closePolygon()).toBe(true);
+		expect(log).toEqual([
+			[
+				"polygon",
+				[
+					{ x: 0, y: 0 },
+					{ x: 50, y: 0 },
+					{ x: 25, y: -20 },
+				],
+			],
+		]);
+	});
+
+	test("clicking near the first vertex closes without Enter", () => {
+		const { session, log } = makeSession(() => undefined);
+		session.setTool("polygon");
+		session.pointerDown(0, 0);
+		session.pointerUp();
+		session.pointerDown(30, 0);
+		session.pointerUp();
+		session.pointerDown(15, -20);
+		session.pointerUp();
+		session.pointerMove(0.2, -0.2);
+		const pv = session.preview();
+		if (!pv || pv.kind !== "polygon")
+			throw new Error("expected polygon preview");
+		expect(pv.closable).toBe(true);
+		session.pointerDown(0.2, -0.2);
+		expect(log).toEqual([
+			[
+				"polygon",
+				[
+					{ x: 0, y: 0 },
+					{ x: 30, y: 0 },
+					{ x: 15, y: -20 },
+				],
+			],
+		]);
+	});
+
+	test("Enter with fewer than three vertices does nothing", () => {
+		const { session, log } = makeSession(() => undefined);
+		session.setTool("polygon");
+		session.pointerDown(0, 0);
+		session.pointerUp();
+		session.pointerDown(10, 0);
+		session.pointerUp();
+		expect(session.closePolygon()).toBe(false);
+		expect(log).toEqual([]);
+	});
+
+	test("Escape discards the in-progress polygon; the tool keeps working", () => {
+		const { session, log } = makeSession(() => undefined);
+		session.setTool("polygon");
+		session.pointerDown(0, 0);
+		session.pointerUp();
+		session.pointerDown(10, 0);
+		session.pointerUp();
+		session.pointerDown(5, -5);
+		session.pointerUp();
+		session.cancel();
+		expect(session.closePolygon()).toBe(false);
+		expect(log).toEqual([]);
+		session.pointerDown(1, 1);
+		expect(session.preview()).not.toBeNull();
+	});
+
+	test("switching tool discards the in-progress polygon", () => {
+		const { session, log } = makeSession(() => undefined);
+		session.setTool("polygon");
+		session.pointerDown(0, 0);
+		session.pointerUp();
+		session.pointerDown(10, 0);
+		session.pointerUp();
+		session.pointerDown(5, -5);
+		session.pointerUp();
+		session.setTool("select");
+		session.pointerUp();
+		expect(session.closePolygon()).toBe(false);
+		expect(log).toEqual([]);
+	});
+});
+
+describe("ToolSession — line tool", () => {
+	test("drag commits the beam on release", () => {
+		const { session, log } = makeSession(() => undefined);
+		session.setTool("line");
+		session.pointerDown(0, 0);
+		session.pointerMove(40, 0);
+		expect(session.preview()).toEqual({
+			kind: "line",
+			cx: 20,
+			cy: 0,
+			rot: 0,
+			halfLength: 20,
+			halfWidth: BEAM_HALF_WIDTH,
+		});
+		session.pointerUp();
+		expect(log).toEqual([
+			[
+				"line",
+				{
+					cx: 20,
+					cy: 0,
+					rot: 0,
+					halfLength: 20,
+					halfWidth: BEAM_HALF_WIDTH,
+				},
+			],
+		]);
+	});
+
+	test("two-click flow: stationary release arms, second press commits", () => {
+		const { session, log } = makeSession(() => undefined);
+		session.setTool("line");
+		session.pointerDown(0, 0);
+		session.pointerUp(); // stationary: stays armed
+		expect(session.preview()).not.toBeNull();
+		session.pointerMove(30, -30);
+		session.pointerDown(30, -30); // second click commits
+		expect(log).toEqual([
+			[
+				"line",
+				{
+					cx: 15,
+					cy: -15,
+					rot: -Math.PI / 4,
+					halfLength: Math.hypot(30, 30) / 2,
+					halfWidth: BEAM_HALF_WIDTH,
+				},
+			],
+		]);
+		// The release after the committing press is a no-op.
+		session.pointerUp();
+		expect(log).toHaveLength(1);
+	});
+
+	test("shift constrains the committed segment", () => {
+		const { session, log } = makeSession(() => undefined);
+		session.setTool("line");
+		session.pointerDown(0, 0, { shift: true });
+		session.pointerMove(30, 10, { shift: true });
+		session.pointerUp();
+		const entry = log[0];
+		if (!entry) throw new Error("no commit");
+		const beam = entry[1] as { cx: number; cy: number };
+		expect(beam.cy).toBe(0); // snapped to horizontal, length preserved
+		expect(beam.cx).toBeCloseTo(Math.hypot(30, 10) / 2, 9);
+	});
+
+	test("shift released before the commit still constrains", () => {
+		const { session, log } = makeSession(() => undefined);
+		session.setTool("line");
+		session.pointerDown(0, 0, { shift: true });
+		session.pointerMove(20, 2); // shift no longer held
+		session.pointerUp();
+		const entry = log[0];
+		if (!entry) throw new Error("no commit");
+		const beam = entry[1] as { cy: number };
+		expect(beam.cy).toBe(0);
+	});
+
+	test("Escape cancels the armed line", () => {
+		const { session, log } = makeSession(() => undefined);
+		session.setTool("line");
+		session.pointerDown(0, 0);
+		session.pointerUp(); // armed (two-click mode)
+		session.cancel();
+		session.pointerMove(30, 0);
+		session.pointerDown(30, 0);
+		expect(log).toEqual([]); // cancelled: nothing commits
 	});
 });

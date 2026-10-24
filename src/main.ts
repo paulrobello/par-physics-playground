@@ -14,7 +14,14 @@ import {
 	createToolEvents,
 } from "./lib/interaction";
 import { attachSimControls } from "./lib/sim-controls";
-import { type PickableBody, pickBody, ToolSession } from "./lib/tools";
+import {
+	bodiesInRect,
+	type PickableBody,
+	pickBody,
+	pickLabel,
+	ToolSession,
+} from "./lib/tools";
+import { UndoStack } from "./lib/undo";
 import { type BodyShape, PhysicsWorld } from "./lib/world";
 import { createRenderer } from "./renderer";
 
@@ -36,17 +43,37 @@ function listPickableBodies(): PickableBody[] {
 	if (!w) return [];
 	const list: PickableBody[] = [];
 	for (const [id, body] of w.bodies) {
-		const shape = w.shapeOf(id);
-		if (!shape) continue;
-		list.push({
-			id,
-			shape,
-			x: body.translation().x,
-			y: body.translation().y,
-			rot: body.rotation(),
-		});
+		const entity = w.doc.get(id);
+		const shape = entity?.kind === "body" ? entity.shape : undefined;
+		if (entity && shape)
+			list.push({
+				id,
+				shape,
+				x: body.translation().x,
+				y: body.translation().y,
+				rot: body.rotation(),
+			});
 	}
 	return list;
+}
+
+/** Labels in pick order (topmost last, matching the document ordering). */
+function listPickableLabels(): {
+	id: string;
+	x: number;
+	y: number;
+	text: string;
+	rot: number;
+}[] {
+	const w = world;
+	if (!w) return [];
+	return w.labels().map((label) => ({
+		id: label.id,
+		x: label.x,
+		y: label.y,
+		text: label.text,
+		rot: label.rot,
+	}));
 }
 
 const sceneView = {
@@ -57,30 +84,43 @@ const sceneView = {
 			x: number,
 			y: number,
 			rot: number,
+			isStatic: boolean,
 		) => void,
 	): void {
 		const w = world;
 		if (!w) return;
 		for (const [id, body] of w.bodies) {
-			const shape = w.shapeOf(id);
-			if (shape)
-				fn(
-					id,
-					shape,
-					body.translation().x,
-					body.translation().y,
-					body.rotation(),
-				);
+			const entity = w.doc.get(id);
+			if (entity?.kind !== "body") continue;
+			fn(
+				id,
+				entity.shape,
+				body.translation().x,
+				body.translation().y,
+				body.rotation(),
+				entity.isStatic,
+			);
 		}
+	},
+	forEachLabel(
+		fn: (id: string, x: number, y: number, rot: number, text: string) => void,
+	): void {
+		const w = world;
+		if (!w) return;
+		for (const label of w.labels())
+			fn(label.id, label.x, label.y, label.rot, label.text);
 	},
 	preview() {
 		return session?.preview() ?? null;
 	},
+	rubberBand() {
+		return session?.rubberBand() ?? null;
+	},
 	hoverId() {
 		return session?.hoverId;
 	},
-	selectedId() {
-		return session?.selectedId;
+	selectedIds() {
+		return session ? [...session.selectedIds] : [];
 	},
 };
 
@@ -93,8 +133,11 @@ const renderer = createRenderer(canvas, {
 		clock?.advanceRealTime(dtSeconds);
 	},
 });
-attachCameraControls(canvas, camera, () =>
-	session?.tool === "select" ? "" : CURSOR_DRAW,
+attachCameraControls(
+	canvas,
+	camera,
+	() => (session?.tool === "select" ? "" : CURSOR_DRAW),
+	() => session?.isEditingText() ?? false,
 );
 
 function fit(): void {
@@ -119,13 +162,46 @@ void (async () => {
 	const w = await PhysicsWorld.create();
 	simClock.subscribe(() => w.step());
 	world = w;
-	const events = createToolEvents(w);
-	session = new ToolSession(events, (wx, wy) =>
-		pickBody(listPickableBodies(), wx, wy),
+	// Undo/redo over the document: serialize always folds the LIVE sim state
+	// into the document first (Ruling 14) so undo restores what the user saw;
+	// restore rebuilds Rapier from the snapshot and clears the selection.
+	const undoStack = new UndoStack(
+		() => {
+			w.syncLiveTransforms();
+			return w.doc.all();
+		},
+		(entities) => {
+			w.restoreSnapshot(entities);
+			session?.selectedIds.clear();
+		},
+	);
+	// Seed the history with the initial (empty) scene so the first action is
+	// undoable back to it.
+	undoStack.commit();
+	// Getters are lazy: the session does not exist yet when the wiring is built.
+	const events = createToolEvents(w, {
+		isPaused: () => clock?.isPaused ?? false,
+		selectedIds: () => session?.selectedIds ?? new Set<string>(),
+		pruneSelection: (id) => {
+			session?.selectedIds.delete(id);
+			if (session?.hoverId === id) session.hoverId = undefined;
+		},
+		isStaticSpawn: () => session?.staticMode ?? false,
+		recordAction: () => undoStack.commit(),
+		beginAction: () => undoStack.beginAction(),
+		cancelAction: () => undoStack.cancelAction(),
+	});
+	session = new ToolSession(
+		events,
+		(wx, wy) =>
+			pickLabel(listPickableLabels(), wx, wy, camera.zoom) ??
+			pickBody(listPickableBodies(), wx, wy),
+		(rect) =>
+			bodiesInRect([...listPickableBodies(), ...listPickableLabels()], rect),
 	);
 	const toolbar = document.querySelector<HTMLElement>("#tool-rail");
 	if (!toolbar) throw new Error("#tool-rail missing from index.html");
-	attachToolControls({ toolbar, canvas, camera, session });
+	attachToolControls({ toolbar, canvas, camera, session, undo: undoStack });
 	// Debug mode must pause the clock BEFORE the sim controls attach, so the
 	// pause button's initial aria state reflects the paused clock.
 	if (debugEnabled) simClock.setPaused(true);
@@ -134,15 +210,19 @@ void (async () => {
 	attachSimControls({
 		topBar,
 		clock: simClock,
+		isEditingText: () => session?.isEditingText() ?? false,
 		// Cancel any active drag first so its mouse joint is removed before the
 		// registry teardown drops the body it references.
 		onReset: () => {
 			session?.cancel();
 			w.reset();
+			session?.selectedIds.clear();
+			if (session) session.hoverId = undefined;
+			undoStack.clear();
 		},
 	});
 	if (debugEnabled) {
-		installDebugApi(simClock, w, camera);
+		installDebugApi(simClock, w, camera, session, undoStack);
 		console.info("[par-physics] debug mode enabled");
 	}
 	clock = simClock;
