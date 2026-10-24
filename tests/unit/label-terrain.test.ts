@@ -197,6 +197,13 @@ describe("static spawn paths (terrain)", () => {
 			{ x: 4, y: 0 },
 			{ x: 2, y: 2 },
 		]);
+		// TEMP CI DIAGNOSTIC (revert with fix): dump live state
+		console.log(
+			"T5DIAG bodies:",
+			[...world.bodies.entries()]
+				.map(([id, b]) => `${id}:fixed=${b.isFixed()}`)
+				.join(" "),
+		);
 		for (const id of ["body-2", "body-3", "body-4"]) {
 			const entity = world.doc.get(id);
 			expect(entity?.kind === "body" && entity.isStatic).toBe(true);
