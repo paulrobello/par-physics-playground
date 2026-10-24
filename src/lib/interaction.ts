@@ -40,6 +40,7 @@ import {
 	DUPLICATE_OFFSET,
 	isToolId,
 	pickBody,
+	ROTATE_FLING_MAX_RAD_S,
 	TOOL_KEYS,
 	type ToolId,
 	type ToolSession,
@@ -576,8 +577,25 @@ export function createToolEvents(
 			// that moved nothing dedupes in the stack).
 			recordAction();
 		},
-		onRotateEnd() {
+		onRotateEnd(angularVelocity) {
 			// Rotate-end boundary (release, cancel, or tool switch).
+			// P3 rotation momentum: a mid-motion RELEASE flings the selection
+			// — signed rad/s onto every selected dynamic body (physical state
+			// like the mouse-joint drag, folded into the document at the next
+			// action boundary, never an undo entry of its own). Paused worlds
+			// and cancellations (undefined velocity) never fling.
+			if (
+				angularVelocity !== undefined &&
+				!deps?.isPaused?.() &&
+				Math.abs(angularVelocity) <= ROTATE_FLING_MAX_RAD_S
+			) {
+				for (const id of selectedIds()) {
+					const body = world.bodies.get(id);
+					if (body && !body.isFixed()) {
+						body.setAngvel(angularVelocity, true);
+					}
+				}
+			}
 			recordAction();
 		},
 		onRotateStart() {

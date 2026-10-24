@@ -236,6 +236,25 @@ export class SceneDocument {
 		return out;
 	}
 
+	/**
+	 * Zero-allocation joint iteration (the render path's per-frame walk —
+	 * P5 per-frame allocation card): visits exactly joints() in order
+	 * without materializing the array.
+	 */
+	eachJoint(fn: (joint: JointEntity) => void): void {
+		for (const e of this.entities.values()) if (e.kind === "joint") fn(e);
+	}
+
+	/** Zero-allocation thruster iteration (eachJoint rationale). */
+	eachThruster(fn: (thruster: ThrusterEntity) => void): void {
+		for (const e of this.entities.values()) if (e.kind === "thruster") fn(e);
+	}
+
+	/** Zero-allocation label iteration (eachJoint rationale). */
+	eachLabel(fn: (label: LabelEntity) => void): void {
+		for (const e of this.entities.values()) if (e.kind === "label") fn(e);
+	}
+
 	/** Update a label's text; false when the id is unknown or is a body. */
 	setLabelText(id: DocumentId, text: string): boolean {
 		const entity = this.entities.get(id);

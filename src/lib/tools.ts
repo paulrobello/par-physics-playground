@@ -144,6 +144,16 @@ export const DUPLICATE_OFFSET = { x: 1, y: -1 } as const;
  */
 export const ROTATE_RADIANS_PER_UNIT = 0.01;
 
+/**
+ * Fling estimation (P3 rotation momentum): samples older than this many
+ * seconds fully decay out of the EMA, so a hesitation before release never
+ * flings; below this angular speed a release is a stop, not a fling.
+ */
+export const ROTATE_FLING_STALE_S = 0.12;
+export const ROTATE_FLING_MIN_RAD_S = 0.8;
+/** Hard cap on a fling's applied spin (provisional — sane tumble, no cannon). */
+export const ROTATE_FLING_MAX_RAD_S = 12;
+
 /** Angle swept by a vertical drag from `startY` to `curY`. */
 export function angleFromVerticalDrag(startY: number, curY: number): number {
 	return (curY - startY) * ROTATE_RADIANS_PER_UNIT;
@@ -489,8 +499,10 @@ export interface ToolSessionEvents {
 	onRotateStart(): void;
 	/** Rotation delta from the rotate gesture's start angle (cumulative). */
 	onRotate(delta: number): void;
-	/** The rotate gesture ended (release, cancel, or tool switch). */
-	onRotateEnd(): void;
+	/** The rotate gesture ended (release, cancel, or tool switch). A RELEASE
+	 * mid-motion carries the fling estimate (signed rad/s, P3 rotation
+	 * momentum); cancellations pass undefined — never fling on cancel. */
+	onRotateEnd(angularVelocity?: number): void;
 	/** The selection set was deleted; ids are the removed bodies. */
 	onDelete(ids: readonly string[]): void;
 	/**
@@ -597,7 +609,14 @@ type Phase =
 			curY: number;
 			additive: boolean;
 	  }
-	| { readonly kind: "rotating"; startY: number }
+	| {
+			readonly kind: "rotating";
+			startY: number;
+			/** Fling estimate (rad/s, signed): EMA of per-move angular velocity. */
+			velocity: number;
+			lastY: number;
+			lastTime: number;
+	  }
 	| {
 			readonly kind: "joint-arming";
 			readonly bodyAId: string;
@@ -650,6 +669,8 @@ export class ToolSession {
 		private readonly events: ToolSessionEvents,
 		private readonly pick: (wx: number, wy: number) => string | undefined,
 		private readonly pickRect?: (rect: DragRect) => readonly string[],
+		/** Monotonic clock in ms (injected: the fling estimate is pure). */
+		private readonly now: () => number = () => performance.now(),
 	) {}
 
 	/** The in-progress drawing preview geometry, or null when not drawing. */
@@ -1012,7 +1033,13 @@ export class ToolSession {
 		if (hit && mods.rotate) {
 			// R-drag rotates the selection; an unselected body joins it first.
 			if (!this.selectedIds.has(hit)) this.selectedIds = new Set([hit]);
-			this.phase = { kind: "rotating", startY: wy };
+			this.phase = {
+				kind: "rotating",
+				startY: wy,
+				velocity: 0,
+				lastY: wy,
+				lastTime: this.now(),
+			};
 			this.events.onRotateStart();
 			return;
 		}
@@ -1095,6 +1122,17 @@ export class ToolSession {
 			return;
 		}
 		if (this.phase.kind === "rotating") {
+			// Fling estimate (P3 rotation momentum): the LAST move's angular
+			// velocity; staleness is judged at release, so a hesitation before
+			// lifting never flings.
+			const t = this.now();
+			const dt = (t - this.phase.lastTime) / 1000;
+			if (dt > 1e-4) {
+				this.phase.velocity =
+					((wy - this.phase.lastY) * ROTATE_RADIANS_PER_UNIT) / dt;
+				this.phase.lastY = wy;
+				this.phase.lastTime = t;
+			}
 			this.events.onRotate(angleFromVerticalDrag(this.phase.startY, wy));
 			return;
 		}
@@ -1162,8 +1200,17 @@ export class ToolSession {
 			return;
 		}
 		if (this.phase.kind === "rotating") {
+			// A release more than ROTATE_FLING_STALE_S after the last motion is
+			// a deliberate stop; only a genuine mid-motion release flings.
+			const stale = (this.now() - this.phase.lastTime) / 1000;
+			const { velocity } = this.phase;
 			this.phase = { kind: "idle" };
-			this.events.onRotateEnd();
+			this.events.onRotateEnd(
+				stale <= ROTATE_FLING_STALE_S &&
+					Math.abs(velocity) >= ROTATE_FLING_MIN_RAD_S
+					? velocity
+					: undefined,
+			);
 			return;
 		}
 		if (this.phase.kind === "dragging") {

@@ -63,7 +63,7 @@ export interface SceneView {
 	/** In-progress drawing preview geometry, or null. */
 	preview(): DrawPreview | null;
 	hoverId(): string | undefined;
-	selectedIds(): readonly string[];
+	selectedIds(): ReadonlySet<string>;
 	/** In-progress rubber-band selection rectangle, or null. */
 	rubberBand(): {
 		cx: number;
@@ -285,6 +285,9 @@ export function createRenderer(
 		shape: BodyShape;
 	}
 	const bodySprites = new Map<string, BodySprite>();
+	/** Persistent per-frame scratch: cleared and refilled by drawBodies — no
+	 * per-frame Set allocation (P5 allocation card). */
+	const seenScratch = new Set<string>();
 	const SPRITE_ZOOM_DRIFT = 0.3;
 	const SPRITE_MARGIN_PX =
 		BODY_SHADOW_BLUR_PX + Math.abs(BODY_SHADOW_OFFSET_Y_PX) + 4;
@@ -366,10 +369,10 @@ export function createRenderer(
 		const selectedIds = scene.selectedIds();
 		const lift = HOVER_LIFT_PX / zoom;
 		const dpr = window.devicePixelRatio;
-		const seen = new Set<string>();
+		seenScratch.clear();
 		scene.forEachBody((id, shape, x, y, rot, isStatic, color) => {
 			const hovered = id === hoverId;
-			seen.add(id);
+			seenScratch.add(id);
 			if (hovered) {
 				// The one live path: hover glow (lift only for dynamic bodies,
 				// static geometry does not hover-lift).
@@ -420,12 +423,12 @@ export function createRenderer(
 			ctx.restore();
 		});
 		// Prune sprites of bodies that left the document (deletes, restores).
-		if (bodySprites.size > seen.size + 64) {
+		if (bodySprites.size > seenScratch.size + 64) {
 			for (const id of bodySprites.keys()) {
-				if (!seen.has(id)) bodySprites.delete(id);
+				if (!seenScratch.has(id)) bodySprites.delete(id);
 			}
 		}
-		if (selectedIds.length > 0) drawSelectionOutlines(selectedIds, zoom);
+		if (selectedIds.size > 0) drawSelectionOutlines(selectedIds, zoom);
 	}
 
 	/** Trace any body shape's closed path (caller begins/ends the path). */
@@ -556,7 +559,7 @@ export function createRenderer(
 	function drawThrusters(zoom: number): void {
 		const scene = options.scene;
 		if (!scene) return;
-		const selected = new Set(scene.selectedIds());
+		const selected = scene.selectedIds();
 		const r = jointGlyphRadius(zoom);
 		ctx.lineWidth = 1.5 / zoom;
 		scene.forEachThruster((id, wx, wy, angle, on) => {
@@ -672,15 +675,18 @@ export function createRenderer(
 		return `${effectiveLabelFontSize(zoom)}px system-ui, -apple-system, sans-serif`;
 	}
 
-	/** Accent outlines + glow around every selected body. */
-	function drawSelectionOutlines(ids: readonly string[], zoom: number): void {
+	/** Accent outlines + glow around every selected body. Takes the LIVE
+	 * selection set — no per-frame copy (P5 allocation card). */
+	function drawSelectionOutlines(
+		wanted: ReadonlySet<string>,
+		zoom: number,
+	): void {
 		const scene = options.scene;
 		if (!scene) return;
 		ctx.shadowColor = HOVER_GLOW;
 		ctx.shadowBlur = HOVER_GLOW_BLUR_PX;
 		ctx.strokeStyle = ACCENT_COLOR;
 		ctx.lineWidth = SELECTION_WIDTH_PX / zoom;
-		const wanted = new Set(ids);
 		scene.forEachBody((bid, shape, x, y, rot) => {
 			if (!wanted.has(bid)) return;
 			ctx.save();

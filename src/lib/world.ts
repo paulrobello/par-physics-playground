@@ -243,6 +243,11 @@ export class PhysicsWorld {
 		return this.doc.thrusters();
 	}
 
+	/** Zero-allocation thruster iteration (the render path's per-frame walk). */
+	eachThrusterEntity(fn: (thruster: ThrusterEntity) => void): void {
+		this.doc.eachThruster(fn);
+	}
+
 	/** Live world pose of a thruster's mount point and thrust direction. */
 	thrusterPose(
 		entity: ThrusterEntity,
@@ -518,6 +523,11 @@ export class PhysicsWorld {
 		return this.doc.joints();
 	}
 
+	/** Zero-allocation joint-entity iteration (the render path's per-frame walk). */
+	eachJointEntity(fn: (joint: JointEntity) => void): void {
+		this.doc.eachJoint(fn);
+	}
+
 	/**
 	 * Replace a joint's params and re-materialize its Rapier impulse joint
 	 * from the stored anchors (the panel's per-type controls — rod length,
@@ -610,6 +620,11 @@ export class PhysicsWorld {
 		const out: LabelEntity[] = [];
 		for (const e of this.doc.all()) if (e.kind === "label") out.push(e);
 		return out;
+	}
+
+	/** Zero-allocation label iteration (the render path's per-frame walk). */
+	eachLabel(fn: (label: LabelEntity) => void): void {
+		this.doc.eachLabel(fn);
 	}
 
 	labelOf(id: DocumentId): LabelEntity | undefined {

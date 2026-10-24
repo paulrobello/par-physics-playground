@@ -399,3 +399,60 @@ describe("freehand tool session flow", () => {
 		expect(spawned).toHaveLength(0);
 	});
 });
+
+describe("freehand boundary discrimination (the fixed snap order is safe)", () => {
+	test("a square FAILS the circle gate — radial rms error, not a circle", () => {
+		// A perfect square's corners sit r·(√2−1) ≈ 0.414·r outside the
+		// least-squares circle: way over the rms/max gates. The fixed
+		// circle→rect order is only safe because this rejection is real.
+		const decision = decideFreehand(
+			densePolyline(
+				[
+					{ x: 0, y: 0 },
+					{ x: 20, y: 0 },
+					{ x: 20, y: 20 },
+					{ x: 0, y: 20 },
+				],
+				12,
+			),
+		);
+		expect(decision.kind).toBe("rect");
+		if (decision.kind === "rect") {
+			// The rect gate caught it: the cleaned rectangle primitive.
+			expect(decision.halfWidth).toBeCloseTo(10, 0);
+			expect(decision.halfHeight).toBeCloseTo(10, 0);
+		}
+	});
+
+	test("a circle FAILS the rectangle gate — missing corners", () => {
+		// The fit rectangle hugs the circle's bounding box; every contour
+		// point sits far from the rect boundary except at 4 tangent spots,
+		// so the mean/max boundary gates reject it before the triangle fit.
+		const decision = decideFreehand(circlePoints(0, 0, 20, 40, 0.02));
+		expect(decision.kind).toBe("circle");
+		if (decision.kind === "circle") {
+			expect(decision.radius).toBeGreaterThan(15);
+			expect(decision.radius).toBeLessThan(25);
+		}
+	});
+
+	test("a wobbly near-square above the rect gates stays freeform", () => {
+		// Corner jitter beyond the rect boundary tolerance: neither circle
+		// nor rect nor triangle — the freeform polygon must survive intact.
+		const decision = decideFreehand(
+			densePolyline(
+				[
+					{ x: 0, y: 0 },
+					{ x: 22, y: 1.5 },
+					{ x: 21, y: 19 },
+					{ x: -1, y: 21 },
+				],
+				12,
+			),
+		);
+		expect(decision.kind).toBe("polygon");
+		if (decision.kind === "polygon") {
+			expect(decision.points.length).toBeGreaterThanOrEqual(4);
+		}
+	});
+});

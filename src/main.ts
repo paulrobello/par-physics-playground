@@ -129,6 +129,10 @@ function listPickableThrusters(): { id: string; wx: number; wy: number }[] {
 	return out;
 }
 
+/** Shared frozen empty selection: the scene adapter's no-session fallback
+ * without an allocation (P5 per-frame allocation card). */
+const EMPTY_SELECTION: ReadonlySet<string> = new Set();
+
 const sceneView = {
 	forEachBody(
 		fn: (
@@ -170,7 +174,7 @@ const sceneView = {
 	): void {
 		const w = world;
 		if (!w) return;
-		for (const e of w.jointEntities()) {
+		w.eachJointEntity((e) => {
 			const anchors = w.jointWorldAnchors(e);
 			if (anchors)
 				fn(
@@ -182,15 +186,16 @@ const sceneView = {
 					anchors.b.x,
 					anchors.b.y,
 				);
-		}
+		});
 	},
 	forEachLabel(
 		fn: (id: string, x: number, y: number, rot: number, text: string) => void,
 	): void {
 		const w = world;
 		if (!w) return;
-		for (const label of w.labels())
-			fn(label.id, label.x, label.y, label.rot, label.text);
+		w.eachLabel((label) =>
+			fn(label.id, label.x, label.y, label.rot, label.text),
+		);
 	},
 	forEachThruster(
 		fn: (
@@ -203,10 +208,10 @@ const sceneView = {
 	) {
 		const w = world;
 		if (!w) return;
-		for (const t of w.thrusterEntities()) {
+		w.eachThrusterEntity((t) => {
 			const pose = w.thrusterPose(t);
 			if (pose) fn(t.id, pose.x, pose.y, pose.angle, t.on);
-		}
+		});
 	},
 	preview() {
 		return session?.preview() ?? null;
@@ -217,8 +222,11 @@ const sceneView = {
 	hoverId() {
 		return session?.hoverId;
 	},
-	selectedIds() {
-		return session ? [...session.selectedIds] : [];
+	selectedIds(): ReadonlySet<string> {
+		// The LIVE selection set (P5 per-frame allocation card): the renderer
+		// reads it during rAF — single-threaded, so no torn reads — and the
+		// per-frame [...spread] copy is gone.
+		return session ? session.selectedIds : EMPTY_SELECTION;
 	},
 };
 
