@@ -35,10 +35,12 @@ import {
 } from "./rope";
 import { THRUSTER_DEFAULT_STRENGTH, type ThrusterEntity } from "./thruster";
 import {
+	BEAM_HALF_WIDTH,
 	beamFromSegment,
 	classifyEditKey,
 	DUPLICATE_OFFSET,
 	isToolId,
+	MIN_SHAPE_HALF_SIZE,
 	pickBody,
 	ROTATE_FLING_MAX_RAD_S,
 	TOOL_KEYS,
@@ -492,18 +494,27 @@ export function createToolEvents(
 						return;
 					}
 					break;
-				case "chain":
-					for (let i = 1; i < result.points.length; i++) {
-						const a = result.points[i - 1] as { x: number; y: number };
-						const b = result.points[i] as { x: number; y: number };
-						const beam = beamFromSegment(a.x, a.y, b.x, b.y);
+				case "chain": {
+					// P4 chain geometry: STATIC chains square-cap each segment
+					// half a beam width past its joint — the bend notch fills and
+					// the rendered surface reads continuous (static-static pairs
+					// never collide, so the cap overlap is free). DYNAMIC chains
+					// accumulate points into whole segments of at least the
+					// minimum half-size instead of clamping halfLengths into
+					// overlapping neighbors.
+					const pts = result.points;
+					const emit = (ax: number, ay: number, bx: number, by: number) => {
+						const len = Math.hypot(bx - ax, by - ay);
+						const beam = beamFromSegment(ax, ay, bx, by);
 						world.spawnEntity({
 							...defaultBody(
 								freshBodyId(),
 								{
 									kind: "box",
-									halfWidth: beam.halfLength,
-									halfHeight: beam.halfWidth,
+									halfWidth: isStatic
+										? len / 2 + BEAM_HALF_WIDTH
+										: Math.max(len / 2, MIN_SHAPE_HALF_SIZE),
+									halfHeight: BEAM_HALF_WIDTH,
 								},
 								beam.cx,
 								beam.cy,
@@ -512,8 +523,28 @@ export function createToolEvents(
 							isStatic,
 							materialId,
 						});
+					};
+					if (isStatic) {
+						for (let i = 1; i < pts.length; i++) {
+							const a = pts[i - 1] as { x: number; y: number };
+							const b = pts[i] as { x: number; y: number };
+							emit(a.x, a.y, b.x, b.y);
+						}
+					} else {
+						let runX = (pts[0] as { x: number; y: number }).x;
+						let runY = (pts[0] as { x: number; y: number }).y;
+						for (let i = 1; i < pts.length; i++) {
+							const p = pts[i] as { x: number; y: number };
+							const runLen = Math.hypot(p.x - runX, p.y - runY);
+							if (runLen >= MIN_SHAPE_HALF_SIZE * 2 || i === pts.length - 1) {
+								emit(runX, runY, p.x, p.y);
+								runX = p.x;
+								runY = p.y;
+							}
+						}
 					}
 					break;
+				}
 			}
 			// Freehand shape-commit boundary (any decision that spawned).
 			recordAction();
