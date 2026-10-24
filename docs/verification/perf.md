@@ -57,3 +57,16 @@ The 1000-stress case runs at the display cap with a 9.8 ms p95 — up from
 50.3 fps in the pre-qualification run; the allocation-free render iteration
 (each* walk, live-selection set, scratch Sets) removed the per-frame GC
 churn that case was paying.
+
+## Pointer-move handler cost (2026-10-24, measurement card)
+
+Synthetic `pointermove` sweeps (5 × 61 moves, real PointerEvent dispatch
+through the stage listener) with the 200-box scene loaded:
+
+| moves | mean | p50 | p95 | max |
+|---|---|---|---|---|
+| 305 | 0.043 ms | <0.01 ms | 0.10 ms | 0.6 ms |
+
+Even a 200 Hz pointer stream costs <2% of the 8.3 ms frame budget (p95).
+The hover pick + worldFromEvent rebuild does not warrant optimization;
+measured before touching it, per the card.
