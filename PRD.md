@@ -5,7 +5,7 @@
 | **Product** | Par Physics Playground — 2D physics sandbox |
 | **Repo** | `~/Repos/par-physics-playground` |
 | **Owner** | Paul Robello |
-| **Status** | Planning complete 2026-10-23. Implementation not yet authorized — run plans from `plans/` in a later session. |
+| **Status** | Phase 0 (repo foundation) implemented 2026-10-23 on branch `worktree-phase-0-foundation`. Phases 1–5 pending. |
 | **Date** | 2026-10-23 |
 
 ## Overview

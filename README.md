@@ -2,6 +2,27 @@
 
 A 2D physics sandbox for the desktop browser: draw shapes into a panable world, apply materials, join objects with pins, motors, springs and ropes, and build machines and Rube Goldberg contraptions.
 
-**Status: planning.** No implementation yet. Read [`PRD.md`](PRD.md) for the product requirements and phased plan; per-phase implementation plans live in [`plans/`](plans/).
+Read [`PRD.md`](PRD.md) for the product requirements and phased plan; per-phase implementation plans live in [`plans/`](plans/).
+
+## Development
+
+Requires [bun](https://bun.sh) (pinned version: 1.4.4).
+
+```sh
+bun install            # bootstrap
+make checkall          # fast gate: typecheck + lint + unit tests
+make checkall-ci       # CI-parity gate: checkall + production build
+make dev               # managed dev server on http://127.0.0.1:8113
+make dev-stop          # stop the managed dev server
+make clean             # stop the owned dev server, then remove build artifacts
+```
+
+Browser smoke tests run locally only (never in CI, per PRD D14). One-time prerequisite: `bunx playwright install chromium`. Then:
+
+```sh
+bunx playwright test   # boots its own dev server on port 8114
+```
+
+CI (GitHub Actions) runs typecheck + lint + unit tests on every push and pull request. The repository has no remote yet, so first-push CI verification is still pending.
 
 Deployment target: https://physics.pardev.net

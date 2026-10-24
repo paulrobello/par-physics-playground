@@ -1,0 +1,88 @@
+/*
+ * D15 HUD skeleton (placeholder chrome): top bar, left tool rail, canvas center,
+ * right context panel. Tokens from the phase-0 impeccable-foundations directives;
+ * the P3-T4 design pass replaces this file's look.
+ */
+
+:root {
+	--canvas-bg: #111418;
+	--panel-bg: #1b2028;
+	--panel-border: #2a323d;
+	--hud-text: #e6e9ee;
+	--hud-text-secondary: #98a2b3;
+}
+
+* {
+	box-sizing: border-box;
+}
+
+html,
+body {
+	margin: 0;
+	height: 100%;
+}
+
+body {
+	font-family: system-ui, -apple-system, "SF Pro Text", "Segoe UI", sans-serif;
+	font-size: 14px;
+	line-height: 1.5;
+	color: var(--hud-text);
+	background: var(--canvas-bg);
+}
+
+#app {
+	display: grid;
+	grid-template-columns: 48px 1fr 280px;
+	grid-template-rows: 40px 1fr;
+	grid-template-areas:
+		"top-bar top-bar top-bar"
+		"tool-rail stage context";
+	height: 100vh;
+}
+
+#top-bar {
+	grid-area: top-bar;
+	display: flex;
+	align-items: center;
+	padding: 0 12px;
+	margin: 0;
+	background: var(--panel-bg);
+	border-bottom: 1px solid var(--panel-border);
+}
+
+#top-bar h1 {
+	margin: 0;
+	font-size: 14px;
+	font-weight: 600;
+}
+
+#tool-rail {
+	grid-area: tool-rail;
+	background: var(--panel-bg);
+	border-right: 1px solid var(--panel-border);
+}
+
+#stage-area {
+	grid-area: stage;
+	position: relative;
+	overflow: hidden;
+}
+
+#stage {
+	display: block;
+	width: 100%;
+	height: 100%;
+}
+
+#context-panel {
+	grid-area: context;
+	background: var(--panel-bg);
+	border-left: 1px solid var(--panel-border);
+}
+
+@media (prefers-reduced-motion: reduce) {
+	* {
+		transition-duration: 0.01ms;
+		animation-duration: 0.01ms;
+	}
+}

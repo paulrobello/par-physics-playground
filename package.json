@@ -1,0 +1,22 @@
+{
+	"name": "par-physics-playground",
+	"private": true,
+	"type": "module",
+	"scripts": {
+		"dev": "vite --host 127.0.0.1 --port 8113 --strictPort",
+		"dev-managed": "bun run scripts/dev-lifecycle.ts start",
+		"dev-stop": "bun run scripts/dev-lifecycle.ts stop",
+		"build": "vite build",
+		"test": "bun test",
+		"typecheck": "tsc --noEmit",
+		"lint": "biome check .",
+		"format": "biome format --write ."
+	},
+	"devDependencies": {
+		"@biomejs/biome": "2.6.2",
+		"@playwright/test": "1.64.1",
+		"@types/bun": "1.4.3",
+		"typescript": "7.0.2",
+		"vite": "8.3.5"
+	}
+}
