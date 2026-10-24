@@ -43,11 +43,12 @@ test("500 mixed bodies hold 60 fps", async ({ page }) => {
 	// Settle the pile before measuring (falling stacks are the easy case;
 	// resting contact stacks are the solver's steady-state load).
 	await page.evaluate(() => window.__ppg?.advanceTime(3_000));
-	const { fps, loadBefore, loadAfter } = await runGuarded(page);
+	const { stats, loadBefore, loadAfter } = await runGuarded(page);
 	console.log(
-		`[perf] 500 typical: ${fps.toFixed(1)} fps (load ${loadBefore.toFixed(2)} → ${loadAfter.toFixed(2)})`,
+		`[perf] 500 typical: ${stats.fps.toFixed(1)} fps (load ${loadBefore.toFixed(2)} → ${loadAfter.toFixed(2)}), frame budget p50 ${stats.p50.toFixed(1)}ms p95 ${stats.p95.toFixed(1)}ms max ${stats.max.toFixed(1)}ms`,
 	);
-	expect(fps).toBeGreaterThanOrEqual(60);
+	expect(stats.fps).toBeGreaterThanOrEqual(60);
+	expect(stats.p95).toBeLessThanOrEqual(25);
 });
 
 test("1000-body machine stress: 300+ rope beads + cart assemblies hold 45 fps", async ({
@@ -121,9 +122,9 @@ test("1000-body machine stress: 300+ rope beads + cart assemblies hold 45 fps", 
 		if (beads < 300) throw new Error(`only ${beads} rope beads placed`);
 	});
 	await page.evaluate(() => window.__ppg?.advanceTime(3_000));
-	const { fps, loadBefore, loadAfter } = await runGuarded(page);
+	const { stats, loadBefore, loadAfter } = await runGuarded(page);
 	console.log(
-		`[perf] 1000 stress: ${fps.toFixed(1)} fps (load ${loadBefore.toFixed(2)} → ${loadAfter.toFixed(2)})`,
+		`[perf] 1000 stress: ${stats.fps.toFixed(1)} fps (load ${loadBefore.toFixed(2)} → ${loadAfter.toFixed(2)}), frame budget p50 ${stats.p50.toFixed(1)}ms p95 ${stats.p95.toFixed(1)}ms max ${stats.max.toFixed(1)}ms`,
 	);
-	expect(fps).toBeGreaterThanOrEqual(45);
+	expect(stats.fps).toBeGreaterThanOrEqual(45);
 });

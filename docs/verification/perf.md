@@ -39,3 +39,21 @@ at the 1000 stress case (met at 50.3 fps).
 200 settled boxes: 0.18 ms/tick sim-only (all sleeping) via `advanceTime`
 probe — rendering was the entire 14 fps regression; the sim has ~90×
 headroom at the typical scale.
+
+## Frame-budget distribution (2026-10-24, cards batch C)
+
+The gate now measures the frame-interval distribution, not just the fps mean
+(a mean can hide systematic dropped frames). Same harness, one measured
+window, p50/p95/max intervals reported per case:
+
+| Case | fps | p50 | p95 | max |
+|---|---|---|---|---|
+| 200-box smoke | 119.8 | 8.3 ms | 9.9 ms | 18.2 ms |
+| 500 mixed typical | 120.0 | 8.3 ms | 9.7 ms | 10.4 ms |
+| 1000 machine stress | 120.0 | 8.3 ms | 9.8 ms | 10.3 ms |
+
+New tail gate: 200-box and 500-typical p95 ≤ 25 ms (2.5× a 60 Hz frame).
+The 1000-stress case runs at the display cap with a 9.8 ms p95 — up from
+50.3 fps in the pre-qualification run; the allocation-free render iteration
+(each* walk, live-selection set, scratch Sets) removed the per-frame GC
+churn that case was paying.

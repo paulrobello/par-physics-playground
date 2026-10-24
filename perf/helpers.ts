@@ -61,13 +61,15 @@ export async function measureFps(page: Page): Promise<number> {
 /**
  * The load-guarded measurement loop shared by every perf case: wait for
  * calm, measure, re-guard after; a load-broken sample is re-measured once.
- * Returns the valid fps sample plus the before/after load for the evidence
- * record.
+ * Runs the frame-stats walk (fps + p50/p95/max from one measured window —
+ * the frame-budget card's distribution, not just the fps mean).
  */
-export async function runGuarded(
-	page: Page,
-): Promise<{ fps: number; loadBefore: number; loadAfter: number }> {
-	let fps = 0;
+export async function runGuarded(page: Page): Promise<{
+	stats: FrameStats;
+	loadBefore: number;
+	loadAfter: number;
+}> {
+	let stats: FrameStats = { fps: 0, p50: 0, p95: 0, max: 0 };
 	let loadAfter = 0;
 	for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt += 1) {
 		// Every attempt re-guards: a prior attempt's own load may still be
@@ -76,12 +78,12 @@ export async function runGuarded(
 		console.log(
 			`[perf] attempt ${attempt}: load before: ${loadBefore.toFixed(2)}`,
 		);
-		fps = await measureFps(page);
+		stats = await measureFrameStats(page);
 		loadAfter = load1min();
 		console.log(
-			`[perf] attempt ${attempt}: ${fps.toFixed(1)} fps, load after: ${loadAfter.toFixed(2)}`,
+			`[perf] attempt ${attempt}: ${stats.fps.toFixed(1)} fps, load after: ${loadAfter.toFixed(2)}`,
 		);
-		if (loadAfter <= LOAD_LIMIT) return { fps, loadBefore, loadAfter };
+		if (loadAfter <= LOAD_LIMIT) return { stats, loadBefore, loadAfter };
 		if (attempt === MAX_ATTEMPTS) {
 			throw new Error(
 				`post-run load ${loadAfter.toFixed(2)} > ${LOAD_LIMIT} on all ${MAX_ATTEMPTS} attempts; sample invalid`,
@@ -89,4 +91,56 @@ export async function runGuarded(
 		}
 	}
 	throw new Error("unreachable");
+}
+
+/** Frame-interval distribution over the measured window (ms). */
+export interface FrameStats {
+	fps: number;
+	p50: number;
+	p95: number;
+	max: number;
+}
+
+/**
+ * Frame-budget distribution (final-review ticket): fps averages hide dropped
+ * frames — a scene can average 60 fps while shedding one frame in three.
+ * Collects every rAF interval across the measured window and reports
+ * p50/p95/max so a gate can bound the TAIL, not the mean.
+ */
+export async function measureFrameStats(page: Page): Promise<FrameStats> {
+	await page.click('[data-sim="pause"]');
+	const intervals = await page.evaluate(
+		({ warmup, measured }) =>
+			new Promise<number[]>((resolve) => {
+				let frames = 0;
+				let last = 0;
+				const deltas: number[] = [];
+				const frame = (t: number) => {
+					if (frames >= warmup && frames < warmup + measured && last > 0) {
+						deltas.push(t - last);
+					}
+					if (frames === warmup + measured) {
+						resolve(deltas);
+						return;
+					}
+					frames += 1;
+					last = t;
+					requestAnimationFrame(frame);
+				};
+				requestAnimationFrame(frame);
+			}),
+		{ warmup: WARMUP_FRAMES, measured: MEASURED_FRAMES },
+	);
+	intervals.sort((a, b) => a - b);
+	const at = (q: number) =>
+		intervals[
+			Math.min(intervals.length - 1, Math.floor(q * intervals.length))
+		] ?? 0;
+	const total = intervals.reduce((sum, d) => sum + d, 0);
+	return {
+		fps: intervals.length > 0 ? 1000 / (total / intervals.length) : 0,
+		p50: at(0.5),
+		p95: at(0.95),
+		max: intervals[intervals.length - 1] ?? 0,
+	};
 }

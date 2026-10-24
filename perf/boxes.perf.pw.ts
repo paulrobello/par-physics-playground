@@ -21,9 +21,15 @@ test("200-body scene holds 60 fps", async ({ page }) => {
 			ppg.spawnBox(`perf-${i}`, -198 + col * 44, -40 - row * 44, 20, 20);
 		}
 	}, 200);
-	const { fps, loadAfter } = await runGuarded(page);
+	const { stats, loadAfter } = await runGuarded(page);
 	expect(loadAfter).toBeLessThanOrEqual(LOAD_LIMIT);
 
-	// The perf gate's own pass/fail: 200 bodies must hold 60 fps.
-	expect(fps).toBeGreaterThanOrEqual(60);
+	// The perf gate's own pass/fail: 200 bodies hold 60 fps AND the frame
+	// TAIL stays bounded — p95 interval <= 25 ms catches systematic dropped
+	// frames that the fps average absorbs (frame-budget card).
+	expect(stats.fps).toBeGreaterThanOrEqual(60);
+	expect(stats.p95).toBeLessThanOrEqual(25);
+	console.log(
+		`[perf] 200-box frame budget: p50 ${stats.p50.toFixed(1)}ms p95 ${stats.p95.toFixed(1)}ms max ${stats.max.toFixed(1)}ms`,
+	);
 });
