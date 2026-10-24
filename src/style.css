@@ -554,6 +554,13 @@ input[type="range"]:hover::-moz-range-thumb {
 	cursor: pointer;
 }
 
+.mat-field input[type="checkbox"] {
+	justify-self: start;
+	width: 14px;
+	height: 14px;
+	accent-color: var(--accent);
+}
+
 .mat-editor input[type="range"] {
 	width: 100%;
 }

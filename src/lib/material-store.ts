@@ -30,6 +30,8 @@ export interface MaterialRecordV1 {
 	density: number;
 	friction: number;
 	restitution: number;
+	/** Brittle flag (optional; absent = false) preserved across sessions. */
+	brittle?: boolean;
 }
 
 export interface MaterialStore {
@@ -50,6 +52,7 @@ function parseRecord(value: unknown): Material | null {
 		density?: unknown;
 		friction?: unknown;
 		restitution?: unknown;
+		brittle?: unknown;
 	};
 	if (r.schema !== 1) return null;
 	if (
@@ -62,6 +65,7 @@ function parseRecord(value: unknown): Material | null {
 	)
 		return null;
 	if (!/^#[0-9a-fA-F]{6}$/.test(r.color)) return null;
+	if (r.brittle !== undefined && typeof r.brittle !== "boolean") return null;
 	if (MATERIAL_PREDEFINED.some((m) => m.id === r.id)) return null;
 	const material: Material = {
 		id: r.id,
@@ -70,6 +74,7 @@ function parseRecord(value: unknown): Material | null {
 		density: r.density,
 		friction: r.friction,
 		restitution: r.restitution,
+		...(r.brittle ? { brittle: true } : {}),
 	};
 	return materialValuesError({
 		name: material.name,

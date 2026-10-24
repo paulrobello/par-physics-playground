@@ -11,6 +11,7 @@
  * below the line (y ∈ [0, 1]).
  */
 import RAPIER from "@dimforge/rapier2d-compat";
+import { fragmentEntities, shouldShatter } from "./brittle";
 import { SIM_DT_SECONDS } from "./clock";
 import {
 	type BodyEntity,
@@ -92,6 +93,13 @@ function rodEffectiveMass(
 	return Number.isFinite(mass) ? mass : 1;
 }
 
+let nextFragmentId = 1;
+
+/** Fallback fragment-id minter when no external one is wired (tests). */
+function mintFragmentId(): DocumentId {
+	return `brittle-frag-${nextFragmentId++}`;
+}
+
 export class PhysicsWorld {
 	readonly world: RAPIER.World;
 	/** Serializable document: identity, geometry, transform per body. */
@@ -102,6 +110,20 @@ export class PhysicsWorld {
 	readonly joints = new Map<DocumentId, RAPIER.ImpulseJoint>();
 
 	private groundBody: RAPIER.RigidBody | null = null;
+	/**
+	 * Contact-force events (brittle shatter, see brittle.ts): step() fills the
+	 * queue (autoDrain=false) and drains it immediately after, so the manual
+	 * drain always sees exactly this tick's events.
+	 */
+	private readonly contactEvents = new RAPIER.EventQueue(false);
+	/** Armed (brittle) collider handles → owning body id (impact lookup). */
+	private readonly brittleColliders = new Map<number, DocumentId>();
+	/**
+	 * Mints shatter-fragment ids. main.ts wires freshBodyId so fragments share
+	 * the body-id space and the scene-file id-counter sync covers restored
+	 * fragments; unset (unit tests), a local brittle-frag-N counter stands in.
+	 */
+	fragmentIdMinter: (() => DocumentId) | null = null;
 	/** Notified on every setGravity (the slider sync in sim-controls). */
 	private readonly gravityListeners = new Set<
 		(vector: { x: number; y: number }) => void
@@ -198,7 +220,9 @@ export class PhysicsWorld {
 		body.setRotation(entity.rot, true);
 		// The entity's materialId is authoritative: density/friction/restitution
 		// all come from the document registry (ink fallback for unknown ids).
-		this.attachShape(body, entity.shape, this.doc.material(entity.materialId));
+		const material = this.doc.material(entity.materialId);
+		this.attachShape(body, entity.shape, material);
+		this.armColliders(entity.id, body, material.brittle === true);
 		this.doc.add(entity);
 		this.bodies.set(entity.id, body);
 		return body;
@@ -698,10 +722,14 @@ export class PhysicsWorld {
 		material: Material,
 	): RAPIER.ColliderDesc {
 		if (!desc) throw new Error("polygon has no valid convex decomposition");
-		return desc
+		desc
 			.setDensity(material.density)
 			.setFriction(material.friction)
 			.setRestitution(material.restitution);
+		if (material.brittle) {
+			desc.setActiveEvents(RAPIER.ActiveEvents.CONTACT_FORCE_EVENTS);
+		}
+		return desc;
 	}
 
 	spawnBox(
@@ -753,12 +781,19 @@ export class PhysicsWorld {
 		if (entity?.kind !== "body" || !body) return false;
 		this.doc.setBodyMaterial(id, materialId);
 		const material = this.doc.material(materialId);
+		const armed = material.brittle === true;
 		for (let i = 0; i < body.numColliders(); i++) {
 			const collider = body.collider(i);
 			collider.setDensity(material.density);
 			collider.setFriction(material.friction);
 			collider.setRestitution(material.restitution);
+			collider.setActiveEvents(
+				armed
+					? RAPIER.ActiveEvents.CONTACT_FORCE_EVENTS
+					: RAPIER.ActiveEvents.NONE,
+			);
 		}
+		this.armColliders(id, body, armed);
 		body.recomputeMassPropertiesFromColliders();
 		return true;
 	}
@@ -818,6 +853,7 @@ export class PhysicsWorld {
 		}
 		const body = this.bodies.get(id);
 		if (body) {
+			this.disarmColliders(body);
 			this.world.removeRigidBody(body);
 			this.bodies.delete(id);
 			this.doc.remove(id);
@@ -965,10 +1001,99 @@ export class PhysicsWorld {
 		}
 	}
 
+	/**
+	 * Track (or drop) a body's collider handles in the brittle-impact lookup.
+	 * Only brittle-armed colliders are tracked, so worlds without brittle
+	 * bodies skip the per-tick drain path entirely (no allocation on the hot
+	 * path).
+	 */
+	private armColliders(
+		id: DocumentId,
+		body: RAPIER.RigidBody,
+		armed: boolean,
+	): void {
+		for (let i = 0; i < body.numColliders(); i++) {
+			const collider = body.collider(i);
+			if (!collider) continue;
+			if (armed) this.brittleColliders.set(collider.handle, id);
+			else this.brittleColliders.delete(collider.handle);
+		}
+	}
+
+	/** Drop every one of a body's collider handles (removal, any arm state). */
+	private disarmColliders(body: RAPIER.RigidBody): void {
+		for (let i = 0; i < body.numColliders(); i++) {
+			const collider = body.collider(i);
+			if (collider) this.brittleColliders.delete(collider.handle);
+		}
+	}
+
+	/**
+	 * Brittle shatter (see brittle.ts): drain the tick's contact-force events
+	 * and replace every qualifying dynamic brittle body with same-material
+	 * fragments. Candidates are collected across all events first (one body
+	 * hit through several manifolds shatters once), and mutations happen only
+	 * after the drain — the callback runs inside the Rapier event iteration.
+	 */
+	private processBrittleImpacts(): void {
+		const gravity =
+			Math.abs(this.world.gravity.x) + Math.abs(this.world.gravity.y);
+		const shattered = new Set<DocumentId>();
+		this.contactEvents.drainContactForceEvents((event) => {
+			const force = event.totalForceMagnitude();
+			for (const handle of [event.collider1(), event.collider2()]) {
+				const id = this.brittleColliders.get(handle);
+				if (id === undefined || shattered.has(id)) continue;
+				const body = this.bodies.get(id);
+				const entity = this.doc.get(id);
+				if (!body || entity?.kind !== "body") continue;
+				if (
+					shouldShatter({
+						shape: entity.shape,
+						brittle: this.doc.material(entity.materialId).brittle === true,
+						isStatic: body.isFixed(),
+						mass: body.mass(),
+						impactForce: force,
+						gravity,
+					})
+				) {
+					shattered.add(id);
+				}
+			}
+		});
+		for (const id of shattered) this.shatterBody(id);
+	}
+
+	/**
+	 * Replace one brittle body with its fragments at its LIVE pose through the
+	 * ordinary document paths (removeBody cascade, spawnEntity), so selection,
+	 * joints, and undo snapshots all converge. A SIM event: NO undo boundary
+	 * here — the next user action's snapshot absorbs the shatter (the
+	 * rotate-fling precedent in interaction.ts).
+	 */
+	private shatterBody(id: DocumentId): void {
+		const entity = this.doc.get(id);
+		const body = this.bodies.get(id);
+		if (entity?.kind !== "body" || !body) return;
+		const live = {
+			x: body.translation().x,
+			y: body.translation().y,
+			rot: body.rotation(),
+		};
+		const fragments = fragmentEntities(
+			this.fragmentIdMinter ?? mintFragmentId,
+			entity,
+			live,
+		);
+		this.removeBody(id);
+		for (const fragment of fragments) this.spawnEntity(fragment);
+	}
+
 	/** One fixed tick: advance physics, then cull bodies below the kill threshold. */
 	step(): void {
 		this.applyThrusters();
-		this.world.step();
+		this.world.step(this.contactEvents);
+		if (this.brittleColliders.size > 0) this.processBrittleImpacts();
 		for (const [id, body] of this.bodies) {
 			if (body.translation().y > KILL_THRESHOLD_Y) {
 				this.removeBody(id);

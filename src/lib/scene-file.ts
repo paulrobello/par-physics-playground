@@ -119,6 +119,9 @@ function checkMaterial(raw: unknown, index: number): string | null {
 	if (typeof m.color !== "string" || m.color.length > 32) {
 		return `customMaterials[${index}].color: invalid`;
 	}
+	if (m.brittle !== undefined && typeof m.brittle !== "boolean") {
+		return `customMaterials[${index}].brittle: not a boolean`;
+	}
 	return null;
 }
 

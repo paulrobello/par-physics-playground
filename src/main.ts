@@ -17,6 +17,7 @@ import {
 	attachToolControls,
 	CURSOR_DRAW,
 	createToolEvents,
+	freshBodyId,
 } from "./lib/interaction";
 import { attachJointPanel } from "./lib/joint-panel";
 import { MATERIAL_DEFAULT_ID } from "./lib/material";
@@ -283,6 +284,9 @@ renderer.start();
 void (async () => {
 	const simClock = new SimClock();
 	const w = await PhysicsWorld.create();
+	// Brittle shatter fragments mint body ids through the shared counter, so
+	// the scene-file id sync never collides with a restored fragment.
+	w.fragmentIdMinter = freshBodyId;
 	simClock.subscribe(() => w.step());
 	world = w;
 	// Demo scene (P4-T5, PRD D16): preloads on first run (persisted flag);

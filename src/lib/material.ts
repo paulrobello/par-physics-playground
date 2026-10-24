@@ -22,6 +22,13 @@ export interface Material {
 	readonly friction: number;
 	/** Restitution (bounciness), 0 = dead stop. */
 	readonly restitution: number;
+	/**
+	 * Brittle: a hard contact impact shatters a DYNAMIC body of this material
+	 * into same-material fragments (box and circle shapes only — see
+	 * brittle.ts for the decision and fragment geometry). Optional; absent or
+	 * false means indestructible.
+	 */
+	readonly brittle?: boolean;
 }
 
 /** The default palette entry; bodies and lookups fall back to it. */

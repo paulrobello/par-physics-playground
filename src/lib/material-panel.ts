@@ -91,6 +91,10 @@ export function attachMaterialPanel(deps: MaterialPanelDeps): void {
 				<input id="mat-restitution" data-mat-restitution type="range" min="0" max="1" step="0.01" value="0.1" />
 				<output data-mat-restitution-out>0.10</output>
 			</div>
+			<div class="mat-field mat-field-brittle">
+				<label for="mat-brittle">Brittle</label>
+				<input id="mat-brittle" data-mat-brittle type="checkbox" />
+			</div>
 			<p class="mat-error" data-mat-error hidden></p>
 			<div class="mat-editor-actions">
 				<button type="button" class="mat-btn primary" data-mat-save>Create</button>
@@ -115,6 +119,7 @@ export function attachMaterialPanel(deps: MaterialPanelDeps): void {
 	const densityInput = q<HTMLInputElement>("[data-mat-density]");
 	const frictionInput = q<HTMLInputElement>("[data-mat-friction]");
 	const restInput = q<HTMLInputElement>("[data-mat-restitution]");
+	const brittleInput = q<HTMLInputElement>("[data-mat-brittle]");
 	const errorEl = q<HTMLParagraphElement>("[data-mat-error]");
 	const saveBtn = q<HTMLButtonElement>("[data-mat-save]");
 
@@ -225,6 +230,7 @@ export function attachMaterialPanel(deps: MaterialPanelDeps): void {
 		densityInput.value = String(source?.density ?? 1);
 		frictionInput.value = String(source?.friction ?? 0.5);
 		restInput.value = String(source?.restitution ?? 0.1);
+		brittleInput.checked = source?.brittle ?? false;
 		// Programmatic value sets don't fire input events; sync the readouts.
 		for (const input of [densityInput, frictionInput, restInput])
 			input.dispatchEvent(new Event("input"));
@@ -260,6 +266,7 @@ export function attachMaterialPanel(deps: MaterialPanelDeps): void {
 			density: values.density,
 			friction: values.friction,
 			restitution: values.restitution,
+			...(brittleInput.checked ? { brittle: true } : {}),
 		};
 		if (editingId) {
 			// Edit is a library op, not undoable (see header): the registry entry
