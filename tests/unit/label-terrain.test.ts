@@ -185,26 +185,32 @@ describe("static spawn paths (terrain)", () => {
 			halfLength: 8,
 			halfWidth: 0.25,
 		};
+		// Ids come from the module-global freshBodyId counter, which other
+		// test files consume too — never hardcode body-N here (CI's file
+		// order broke on exactly that; linux readdir ≠ APFS readdir).
+		const lastSpawnedId = (): string => {
+			const ids = [...world.bodies.keys()];
+			const id = ids.at(-1);
+			if (!id) throw new Error("no body spawned");
+			return id;
+		};
 		events.onSpawnLine(beam);
-		const beamEntity = world.doc.get("body-1");
+		const beamId = lastSpawnedId();
+		const beamEntity = world.doc.get(beamId);
 		expect(beamEntity?.kind === "body" && beamEntity.isStatic).toBe(false);
 		staticSpawn = true;
 		const rect: DragRect = { cx: 5, cy: -5, halfWidth: 3, halfHeight: 1 };
 		events.onSpawnBox(rect);
+		const boxId = lastSpawnedId();
 		events.onSpawnCircle({ cx: -5, cy: -5, radius: 2 });
+		const circleId = lastSpawnedId();
 		events.onSpawnPolygon([
 			{ x: 0, y: 0 },
 			{ x: 4, y: 0 },
 			{ x: 2, y: 2 },
 		]);
-		// TEMP CI DIAGNOSTIC (revert with fix): dump live state
-		console.log(
-			"T5DIAG bodies:",
-			[...world.bodies.entries()]
-				.map(([id, b]) => `${id}:fixed=${b.isFixed()}`)
-				.join(" "),
-		);
-		for (const id of ["body-2", "body-3", "body-4"]) {
+		const polygonId = lastSpawnedId();
+		for (const id of [boxId, circleId, polygonId]) {
 			const entity = world.doc.get(id);
 			expect(entity?.kind === "body" && entity.isStatic).toBe(true);
 			expect(world.bodies.get(id)?.isFixed()).toBe(true);
