@@ -9,7 +9,7 @@ import { attachAssemblyPanel } from "./lib/assembly-panel";
 import { createAssemblyStore } from "./lib/assembly-store";
 import { Camera, cameraFitForBounds } from "./lib/camera";
 import { attachCameraControls } from "./lib/camera-controls";
-import { SimClock } from "./lib/clock";
+import { SIM_SPEED_FACTOR, SimClock } from "./lib/clock";
 import { installDebugApi } from "./lib/debug-api";
 import { buildDemoScene, demoSceneBounds } from "./lib/demo-scene";
 import { markDemoSceneSeen, shouldLoadDemoScene } from "./lib/first-run";
@@ -280,7 +280,10 @@ const simPump = createSimPump(
 		// Time-scale (P3-T3) scales the pump's FEED only: the fixed 60Hz tick
 		// is unchanged, and the debug advanceTime path (which steps ticks
 		// directly) never sees the scale — determinism guard, pinned in e2e.
-		clock?.advanceRealTime(seconds * timeScale.value);
+		// SIM_SPEED_FACTOR doubles the nominal 1x: the world advances two
+		// sim-seconds per wall second at the slider's 1.00 (Paul, 2026-10-24
+		// — real-time gravity read as slow motion at this world scale).
+		clock?.advanceRealTime(seconds * timeScale.value * SIM_SPEED_FACTOR);
 	},
 	() => performance.now(),
 );

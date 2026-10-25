@@ -1,5 +1,10 @@
 import { describe, expect, test } from "bun:test";
-import { SIM_DT_SECONDS, SIM_TICK_HZ, SimClock } from "../../src/lib/clock";
+import {
+	SIM_DT_SECONDS,
+	SIM_SPEED_FACTOR,
+	SIM_TICK_HZ,
+	SimClock,
+} from "../../src/lib/clock";
 
 describe("SimClock", () => {
 	test("SIM_TICK_HZ is 60 and dt matches", () => {
@@ -103,5 +108,22 @@ describe("SimClock", () => {
 		unsubscribe();
 		clock.advanceSimTime(1 / 60);
 		expect(calls).toBe(1);
+	});
+});
+
+describe("wall-speed factor", () => {
+	test("the nominal 1x runs at double real time (SIM_SPEED_FACTOR = 2)", () => {
+		expect(SIM_SPEED_FACTOR).toBe(2);
+	});
+
+	test("the catch-up cap holds factor + slider 2x with headroom", () => {
+		// A 100ms pump window at the factor = 0.2 sim-s = 12 ticks; the
+		// slider's 2x doubles it to 24 — the 48 cap covers both with margin.
+		// (SimClock itself is factor-agnostic: the factor lives in the pump
+		// feed in main.ts.)
+		const clock = new SimClock();
+		expect(clock.maxCatchUpSteps).toBe(48);
+		clock.advanceRealTime(0.1);
+		expect(clock.tick).toBe(6); // 0.1s × 60 Hz — pure clock, no factor
 	});
 });
