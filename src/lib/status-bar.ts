@@ -41,6 +41,10 @@ export interface StatusBarDeps {
 	host: HTMLElement;
 	world: PhysicsWorld;
 	session: ToolSession;
+	/** Restored FPS-readout visibility (settings persistence). */
+	initialFpsVisible?: boolean | undefined;
+	/** Fired after the FPS toggle flips — the settings save hook. */
+	onFpsToggle?: ((visible: boolean) => void) | undefined;
 }
 
 export interface StatusBar {
@@ -56,11 +60,14 @@ export function attachStatusBar(deps: StatusBarDeps): StatusBar {
 	if (!helpEl || !statsEl || !fpsEl || !fpsToggle)
 		throw new Error("status bar: missing elements");
 
-	let fpsVisible = false;
+	let fpsVisible = deps.initialFpsVisible ?? false;
+	fpsEl.hidden = !fpsVisible;
+	fpsToggle.setAttribute("aria-pressed", String(fpsVisible));
 	fpsToggle.addEventListener("click", () => {
 		fpsVisible = !fpsVisible;
 		fpsEl.hidden = !fpsVisible;
 		fpsToggle.setAttribute("aria-pressed", String(fpsVisible));
+		deps.onFpsToggle?.(fpsVisible);
 	});
 
 	let lastHelp = "";

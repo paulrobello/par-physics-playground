@@ -853,6 +853,10 @@ export interface ToolControlsDeps {
 	 * returns false and the double-click means nothing.
 	 */
 	onLabelDoubleClick?: (wx: number, wy: number) => boolean;
+	/** Fired after a tool change commits — the settings save hook. */
+	onToolChange?: ((tool: ToolId) => void) | undefined;
+	/** Fired after the static-mode toggle flips — the settings save hook. */
+	onStaticModeChange?: ((on: boolean) => void) | undefined;
 }
 
 /** Cursor while a draw tool is armed (the camera's resting cursor, too). */
@@ -915,6 +919,7 @@ export function attachToolControls(deps: ToolControlsDeps): () => void {
 	const toggleStaticMode = (): void => {
 		session.staticMode = !session.staticMode;
 		syncStaticMode();
+		deps.onStaticModeChange?.(session.staticMode);
 	};
 
 	function syncStaticMode(): void {
@@ -981,6 +986,7 @@ export function attachToolControls(deps: ToolControlsDeps): () => void {
 		session.setTool(tool);
 		syncToolbar();
 		applyCursor();
+		deps.onToolChange?.(tool);
 	};
 
 	function worldFromEvent(event: PointerEvent): { x: number; y: number } {
@@ -1155,6 +1161,7 @@ export function attachToolControls(deps: ToolControlsDeps): () => void {
 	window.addEventListener("blur", onWindowBlur);
 
 	syncToolbar();
+	syncStaticMode();
 	applyCursor();
 	return () => {
 		canvas.removeEventListener("pointerdown", onPointerDown);

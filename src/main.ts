@@ -33,7 +33,17 @@ import {
 } from "./lib/scene-file";
 import { SceneStore } from "./lib/scene-store";
 import { attachSceneUI } from "./lib/scene-ui";
-import { attachSimControls, TimeScale } from "./lib/sim-controls";
+import {
+	loadSettings,
+	type PersistedSettings,
+	saveSettings,
+} from "./lib/settings-store";
+import {
+	attachSimControls,
+	gravityFromVector,
+	gravityVector,
+	TimeScale,
+} from "./lib/sim-controls";
 import { createSimPump } from "./lib/sim-pump";
 import { attachStatusBar, type StatusBar } from "./lib/status-bar";
 import {
@@ -378,6 +388,13 @@ void (async () => {
 	w.fragmentIdMinter = freshBodyId;
 	simClock.subscribe(() => w.step());
 	world = w;
+	// Settings persistence (settings-store.ts): load before any control
+	// attaches — the attach-time syncs mirror restored state into the DOM —
+	// and a tiny save helper every wiring site below shares.
+	const settings = loadSettings(localStorage);
+	const save = (patch: Partial<PersistedSettings>): void => {
+		saveSettings(localStorage, patch);
+	};
 	// Demo scene (P4-T5, PRD D16): preloads on first run (persisted flag);
 	// `?demo=1` forces the load in debug mode as the deterministic e2e hook,
 	// and `?debug=1` alone skips the preload so deterministic test pages
@@ -456,6 +473,11 @@ void (async () => {
 		(rect) =>
 			bodiesInRect([...listPickableBodies(), ...listPickableLabels()], rect),
 	);
+	// Restore tool + static mode before the toolbar attaches: the attach-time
+	// syncToolbar/applyCursor mirror them into the DOM (boot has no gesture,
+	// so the direct field writes skip setTool's gesture teardown).
+	session.tool = settings.tool;
+	session.staticMode = settings.staticMode;
 	const toolbar = document.querySelector<HTMLElement>("#tool-rail");
 	if (!toolbar) throw new Error("#tool-rail missing from index.html");
 	attachToolControls({
@@ -475,6 +497,8 @@ void (async () => {
 			s.beginTextEditing(hit, label.x, label.y, label.text);
 			return true;
 		},
+		onToolChange: (tool) => save({ tool }),
+		onStaticModeChange: (on) => save({ staticMode: on }),
 	});
 	// Debug mode must pause the clock BEFORE the sim controls attach, so the
 	// pause button's initial aria state reflects the paused clock.
@@ -482,12 +506,31 @@ void (async () => {
 	const topBar = document.querySelector<HTMLElement>("#top-bar");
 	if (!topBar) throw new Error("#top-bar missing from index.html");
 	// Header draw options (grid/snap/center/square/angle-snap): plain session
-	// fields + the renderer's grid spacing; nothing else to wire.
-	attachDrawOptions({ host: topBar, session, renderer });
+	// fields + the renderer's grid spacing; persistence restores via the
+	// handle and saves every change.
+	const drawOptions = attachDrawOptions({
+		host: topBar,
+		session,
+		renderer,
+		onChange: (values) => save(values),
+	});
+	drawOptions.apply({
+		gridSize: settings.gridSize,
+		gridSnap: settings.gridSnap,
+		circleFromCenter: settings.circleFromCenter,
+		constrainBox: settings.constrainBox,
+		angleSnap: settings.angleSnap,
+	});
 	// Bottom status bar: per-tool help + live scene census + FPS toggle.
 	const statusBarEl = document.querySelector<HTMLElement>("#status-bar");
 	if (!statusBarEl) throw new Error("#status-bar missing from index.html");
-	statusBar = attachStatusBar({ host: statusBarEl, world: w, session });
+	statusBar = attachStatusBar({
+		host: statusBarEl,
+		world: w,
+		session,
+		initialFpsVisible: settings.fpsVisible,
+		onFpsToggle: (visible) => save({ fpsVisible: visible }),
+	});
 	// Demo / New-empty-world scene actions (P4-T5, D16): loading the demo
 	// replaces the scene through the ordinary restoreSnapshot path and seeds
 	// a fresh undo history from it; an empty world is the same teardown the
@@ -543,6 +586,20 @@ void (async () => {
 		// Cancel any active drag first so its mouse joint is removed before the
 		// registry teardown drops the body it references.
 		onReset: clearWorld,
+	});
+	// Restore speed + gravity after the sim controls attach — their existing
+	// subscriptions repaint the sliders — and BEFORE the save subscriptions
+	// so the boot restore never writes back.
+	timeScale.set(settings.timeScale);
+	const restoredG = gravityVector(
+		settings.gravityAngleDeg,
+		settings.gravityMagnitude,
+	);
+	w.setGravity(restoredG.x, restoredG.y);
+	timeScale.subscribe((v) => save({ timeScale: v }));
+	w.subscribeGravity((g) => {
+		const { angleDeg, magnitude } = gravityFromVector(g);
+		save({ gravityAngleDeg: angleDeg, gravityMagnitude: magnitude });
 	});
 	if (debugEnabled) {
 		installDebugApi(

@@ -2,20 +2,47 @@
  * Header draw options (grid size + snap, circle-from-center, square boxes,
  * angle snap): a small always-visible control cluster wired straight onto the
  * ToolSession's option fields and the renderer's grid spacing. Options are
- * session state, not document state — they do not persist across reloads,
- * matching gravity/speed.
+ * session state; settings persistence (settings-store.ts) restores them at
+ * boot through the returned handle and saves every change via onChange.
  */
 import type { Renderer } from "../renderer";
-import { type ToolSession } from "./tools";
+import type { ToolSession } from "./tools";
+
+/** The option values, as the controls and the settings store express them. */
+export interface DrawOptionValues {
+	gridSize: number;
+	gridSnap: boolean;
+	circleFromCenter: boolean;
+	constrainBox: boolean;
+	angleSnap: boolean;
+}
 
 export interface DrawOptionsDeps {
 	/** The header hosting the controls (#top-bar). */
 	host: HTMLElement;
 	session: ToolSession;
 	renderer: Renderer;
+	/**
+	 * Fired after a user change commits (grid size or a toggle) with the full
+	 * current values — the settings-persistence save hook. A boot restore via
+	 * the returned handle does NOT fire it.
+	 */
+	onChange?: ((values: DrawOptionValues) => void) | undefined;
 }
 
-export function attachDrawOptions(deps: DrawOptionsDeps): void {
+/** Returned handle: pushes stored values into session + renderer + DOM. */
+export interface DrawOptionsHandle {
+	apply(values: Partial<DrawOptionValues>): void;
+}
+
+/** Grid-size clamp shared by the input handler and the restore path. */
+export function clampGridSizeValue(raw: number, fallback: number): number {
+	return Number.isFinite(raw) && raw >= 2
+		? Math.min(Math.round(raw), 512)
+		: fallback;
+}
+
+export function attachDrawOptions(deps: DrawOptionsDeps): DrawOptionsHandle {
 	const gridSize = deps.host.querySelector<HTMLInputElement>(
 		'[data-draw="grid-size"]',
 	);
@@ -44,32 +71,64 @@ export function attachDrawOptions(deps: DrawOptionsDeps): void {
 	)
 		throw new Error("draw-option controls missing from the top bar");
 
+	/** Push values into session + renderer + DOM (the restore path). */
+	const apply = (values: Partial<DrawOptionValues>): void => {
+		if (values.gridSize !== undefined) {
+			const size = clampGridSizeValue(values.gridSize, deps.session.gridSize);
+			deps.session.gridSize = size;
+			deps.renderer.gridSize = size;
+			gridSize.value = String(size);
+			gridSizeOut.value = `${size}u`;
+		}
+		if (values.gridSnap !== undefined) {
+			deps.session.gridSnap = values.gridSnap;
+			gridSnap.checked = values.gridSnap;
+		}
+		if (values.circleFromCenter !== undefined) {
+			deps.session.circleFromCenter = values.circleFromCenter;
+			circleCenter.checked = values.circleFromCenter;
+		}
+		if (values.constrainBox !== undefined) {
+			deps.session.constrainBox = values.constrainBox;
+			boxSquare.checked = values.constrainBox;
+		}
+		if (values.angleSnap !== undefined) {
+			deps.session.angleSnap = values.angleSnap;
+			angleSnap.checked = values.angleSnap;
+		}
+	};
+
+	/** A user change: apply, then hand the full values to persistence. */
+	const commit = (values: Partial<DrawOptionValues>): void => {
+		apply(values);
+		deps.onChange?.({
+			gridSize: deps.session.gridSize,
+			gridSnap: deps.session.gridSnap,
+			circleFromCenter: deps.session.circleFromCenter,
+			constrainBox: deps.session.constrainBox,
+			angleSnap: deps.session.angleSnap,
+		});
+	};
+
 	// Grid size commits on "change" (blur/Enter/arrows), not per keystroke —
 	// clamping mid-typing would fight the user; the output reflects the
 	// applied value.
-	const applyGridSize = (): void => {
-		const raw = Number(gridSize.value);
-		const size =
-			Number.isFinite(raw) && raw >= 2
-				? Math.min(Math.round(raw), 512)
-				: deps.session.gridSize;
-		deps.session.gridSize = size;
-		deps.renderer.gridSize = size;
-		gridSize.value = String(size);
-		gridSizeOut.value = `${size}u`;
-	};
-	gridSize.addEventListener("change", applyGridSize);
+	gridSize.addEventListener("change", () => {
+		commit({ gridSize: Number(gridSize.value) });
+	});
 
 	gridSnap.addEventListener("change", () => {
-		deps.session.gridSnap = gridSnap.checked;
+		commit({ gridSnap: gridSnap.checked });
 	});
 	circleCenter.addEventListener("change", () => {
-		deps.session.circleFromCenter = circleCenter.checked;
+		commit({ circleFromCenter: circleCenter.checked });
 	});
 	boxSquare.addEventListener("change", () => {
-		deps.session.constrainBox = boxSquare.checked;
+		commit({ constrainBox: boxSquare.checked });
 	});
 	angleSnap.addEventListener("change", () => {
-		deps.session.angleSnap = angleSnap.checked;
+		commit({ angleSnap: angleSnap.checked });
 	});
+
+	return { apply };
 }
