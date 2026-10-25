@@ -174,11 +174,25 @@ export function rectFromDrag(
 	ay: number,
 	bx: number,
 	by: number,
+	square = false,
 ): DragRect {
 	const cx = (ax + bx) / 2;
 	const cy = (ay + by) / 2;
-	const halfWidth = Math.max(Math.abs(bx - ax) / 2, MIN_SHAPE_HALF_SIZE);
-	const halfHeight = Math.max(Math.abs(by - ay) / 2, MIN_SHAPE_HALF_SIZE);
+	// Square constrain: the larger drag dimension wins, so growing past the
+	// other axis keeps the shape square instead of collapsing it.
+	const side = square
+		? Math.max(
+				Math.abs(bx - ax) / 2,
+				Math.abs(by - ay) / 2,
+				MIN_SHAPE_HALF_SIZE,
+			)
+		: 0;
+	const halfWidth = square
+		? side
+		: Math.max(Math.abs(bx - ax) / 2, MIN_SHAPE_HALF_SIZE);
+	const halfHeight = square
+		? side
+		: Math.max(Math.abs(by - ay) / 2, MIN_SHAPE_HALF_SIZE);
 	return { cx, cy, halfWidth, halfHeight };
 }
 
@@ -200,6 +214,41 @@ export function circleFromDrag(
 		cy: rect.cy,
 		radius: Math.max(rect.halfWidth, rect.halfHeight),
 	};
+}
+
+/**
+ * Circle from center (the draw-options Center toggle): the press point stays
+ * the center; the radius tracks the larger drag dimension — the same "reaches
+ * the longer sides' midpoints" convention as {@link circleFromDrag}, just
+ * anchored at the press point instead of the drag midpoint.
+ */
+export function circleFromCenterDrag(
+	ax: number,
+	ay: number,
+	bx: number,
+	by: number,
+): { cx: number; cy: number; radius: number } {
+	return {
+		cx: ax,
+		cy: ay,
+		radius: Math.max(Math.abs(bx - ax), Math.abs(by - ay), MIN_SHAPE_HALF_SIZE),
+	};
+}
+
+/** Default grid spacing in world units (matches the 1×-zoom adaptive grid). */
+export const DEFAULT_GRID_SIZE = 32;
+
+/** Rotation angle snap quantum (the draw-options Angle-snap toggle). */
+export const ANGLE_SNAP_STEP = Math.PI / 12;
+
+/** Nearest multiple of `step` (radians) — 15° steps by default. */
+export function snapAngle(rad: number, step = ANGLE_SNAP_STEP): number {
+	return Math.round(rad / step) * step;
+}
+
+/** Nearest grid multiple (the draw-options Snap toggle; `size` in world units). */
+export function snapToGrid(value: number, size: number): number {
+	return Math.round(value / size) * size;
 }
 
 /**
@@ -716,6 +765,28 @@ export class ToolSession {
 	 */
 	staticMode = false;
 	/**
+	 * Draw options (header toggles/field, wired in draw-options.ts): grid snap
+	 * snaps box/circle/polygon/line pointer samples to the grid spacing;
+	 * from-center anchors circles at the press point; constrain-square forces
+	 * box drags square; angle snap quantizes the rotate gesture to 15° steps
+	 * (and suppresses the release fling, which would immediately break the
+	 * snap).
+	 */
+	gridSnap = false;
+	gridSize = DEFAULT_GRID_SIZE;
+	circleFromCenter = false;
+	constrainBox = false;
+	angleSnap = false;
+
+	/** Pointer sample for the point-based draw tools, snapped when Snap is on. */
+	private snapPoint(wx: number, wy: number): { x: number; y: number } {
+		if (!this.gridSnap || this.gridSize <= 0) return { x: wx, y: wy };
+		return {
+			x: snapToGrid(wx, this.gridSize),
+			y: snapToGrid(wy, this.gridSize),
+		};
+	}
+	/**
 	 * The joint tool's active placement kind (P4-T2; motor joins in P4-T3):
 	 * the segmented picker in the tool rail sets it; placement derives params
 	 * from it via {@link makePlacedJoint}. Default pin (the T1 behavior).
@@ -749,28 +820,42 @@ export class ToolSession {
 		private readonly now: () => number = () => performance.now(),
 	) {}
 
+	/** Box/circle geometry for the current drag, honoring the option toggles. */
+	private boxCircleGeom(
+		ax: number,
+		ay: number,
+		bx: number,
+		by: number,
+	):
+		| {
+				kind: "rect";
+				cx: number;
+				cy: number;
+				halfWidth: number;
+				halfHeight: number;
+		  }
+		| { kind: "circle"; cx: number; cy: number; radius: number } {
+		if (this.tool === "box") {
+			return {
+				kind: "rect",
+				...rectFromDrag(ax, ay, bx, by, this.constrainBox),
+			};
+		}
+		const circle = this.circleFromCenter
+			? circleFromCenterDrag(ax, ay, bx, by)
+			: circleFromDrag(ax, ay, bx, by);
+		return { kind: "circle", ...circle };
+	}
+
 	/** The in-progress drawing preview geometry, or null when not drawing. */
 	preview(): DrawPreview | null {
 		if (this.phase.kind === "drawing") {
-			return this.tool === "box"
-				? {
-						kind: "rect",
-						...rectFromDrag(
-							this.phase.startX,
-							this.phase.startY,
-							this.phase.curX,
-							this.phase.curY,
-						),
-					}
-				: {
-						kind: "circle",
-						...circleFromDrag(
-							this.phase.startX,
-							this.phase.startY,
-							this.phase.curX,
-							this.phase.curY,
-						),
-					};
+			return this.boxCircleGeom(
+				this.phase.startX,
+				this.phase.startY,
+				this.phase.curX,
+				this.phase.curY,
+			);
 		}
 		if (this.phase.kind === "line-drawing") {
 			return {
@@ -1003,8 +1088,15 @@ export class ToolSession {
 		if (this.phase.kind === "line-drawing") {
 			// Two-click mode: this press is the segment's far end → commit.
 			const { startX, startY, shift } = this.phase;
+			const snapped = this.snapPoint(wx, wy);
 			this.phase = { kind: "idle" };
-			this.spawnLine(startX, startY, wx, wy, shift || mods.shift === true);
+			this.spawnLine(
+				startX,
+				startY,
+				snapped.x,
+				snapped.y,
+				shift || mods.shift === true,
+			);
 			return;
 		}
 		if (this.phase.kind === "joint-arming") {
@@ -1077,8 +1169,9 @@ export class ToolSession {
 		}
 		if (this.phase.kind === "polygon-place") {
 			const first = this.phase.points[0] as Vec2;
-			const dx = wx - first.x;
-			const dy = wy - first.y;
+			const snapped = this.snapPoint(wx, wy);
+			const dx = snapped.x - first.x;
+			const dy = snapped.y - first.y;
 			if (
 				this.phase.points.length >= 3 &&
 				dx * dx + dy * dy <= POLYGON_CLOSE_RADIUS * POLYGON_CLOSE_RADIUS
@@ -1088,9 +1181,9 @@ export class ToolSession {
 			}
 			this.phase = {
 				...this.phase,
-				points: [...this.phase.points, { x: wx, y: wy }],
-				curX: wx,
-				curY: wy,
+				points: [...this.phase.points, { x: snapped.x, y: snapped.y }],
+				curX: snapped.x,
+				curY: snapped.y,
 			};
 			return;
 		}
@@ -1151,22 +1244,24 @@ export class ToolSession {
 			return;
 		}
 		if (this.tool === "line") {
+			const snapped = this.snapPoint(wx, wy);
 			this.phase = {
 				kind: "line-drawing",
-				startX: wx,
-				startY: wy,
-				curX: wx,
-				curY: wy,
+				startX: snapped.x,
+				startY: snapped.y,
+				curX: snapped.x,
+				curY: snapped.y,
 				shift: mods.shift === true,
 			};
 			return;
 		}
 		if (this.tool === "polygon") {
+			const snapped = this.snapPoint(wx, wy);
 			this.phase = {
 				kind: "polygon-place",
-				points: [{ x: wx, y: wy }],
-				curX: wx,
-				curY: wy,
+				points: [{ x: snapped.x, y: snapped.y }],
+				curX: snapped.x,
+				curY: snapped.y,
 			};
 			return;
 		}
@@ -1192,12 +1287,13 @@ export class ToolSession {
 			return;
 		}
 		if (this.tool !== "select") {
+			const snapped = this.snapPoint(wx, wy);
 			this.phase = {
 				kind: "drawing",
-				startX: wx,
-				startY: wy,
-				curX: wx,
-				curY: wy,
+				startX: snapped.x,
+				startY: snapped.y,
+				curX: snapped.x,
+				curY: snapped.y,
 			};
 			return;
 		}
@@ -1252,20 +1348,23 @@ export class ToolSession {
 
 	pointerMove(wx: number, wy: number, mods: { shift?: boolean } = {}): void {
 		if (this.phase.kind === "drawing") {
-			this.phase = { ...this.phase, curX: wx, curY: wy };
+			const snapped = this.snapPoint(wx, wy);
+			this.phase = { ...this.phase, curX: snapped.x, curY: snapped.y };
 			return;
 		}
 		if (this.phase.kind === "line-drawing") {
+			const snapped = this.snapPoint(wx, wy);
 			this.phase = {
 				...this.phase,
-				curX: wx,
-				curY: wy,
+				curX: snapped.x,
+				curY: snapped.y,
 				shift: mods.shift ?? this.phase.shift,
 			};
 			return;
 		}
 		if (this.phase.kind === "polygon-place") {
-			this.phase = { ...this.phase, curX: wx, curY: wy };
+			const snapped = this.snapPoint(wx, wy);
+			this.phase = { ...this.phase, curX: snapped.x, curY: snapped.y };
 			return;
 		}
 		if (this.phase.kind === "freehand") {
@@ -1375,11 +1474,21 @@ export class ToolSession {
 		if (this.phase.kind === "drawing") {
 			const { startX, startY, curX, curY } = this.phase;
 			this.phase = { kind: "idle" };
-			if (this.tool === "box") {
-				this.events.onSpawnBox(rectFromDrag(startX, startY, curX, curY));
-			} else {
-				this.events.onSpawnCircle(circleFromDrag(startX, startY, curX, curY));
-			}
+			const geom = this.boxCircleGeom(startX, startY, curX, curY);
+			// Emit the bare payload the events expect (no discriminator kind).
+			if (geom.kind === "rect")
+				this.events.onSpawnBox({
+					cx: geom.cx,
+					cy: geom.cy,
+					halfWidth: geom.halfWidth,
+					halfHeight: geom.halfHeight,
+				});
+			else
+				this.events.onSpawnCircle({
+					cx: geom.cx,
+					cy: geom.cy,
+					radius: geom.radius,
+				});
 			return;
 		}
 		if (this.phase.kind === "rubberband") {

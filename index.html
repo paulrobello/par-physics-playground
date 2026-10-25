@@ -58,6 +58,28 @@
 						<input id="sim-time-scale" data-sim="time-scale" type="range" min="0.25" max="2" step="0.05" value="1" aria-label="Time scale, from quarter speed to double speed" />
 						<output data-sim="time-scale-out" for="sim-time-scale">1.00×</output>
 					</div>
+					<span class="sim-sep" aria-hidden="true"></span>
+					<div class="sim-field">
+						<label for="draw-grid-size">Grid</label>
+						<input id="draw-grid-size" data-draw="grid-size" type="number" min="2" max="512" step="1" value="32" aria-label="Grid size, world units" data-tip="Grid size (world units) — the canvas grid draws at multiples of this, and the Snap toggle uses it" />
+						<output data-draw="grid-size-out" for="draw-grid-size">32u</output>
+					</div>
+					<label class="header-toggle" data-tip="Snap to grid — box, circle, polygon and line drawing points snap to the grid spacing">
+						<input type="checkbox" data-draw="grid-snap" />
+						<span>Snap</span>
+					</label>
+					<label class="header-toggle" data-tip="Circle from center — the press point is the circle's center; the drag sets the radius">
+						<input type="checkbox" data-draw="circle-center" />
+						<span>Center</span>
+					</label>
+					<label class="header-toggle" data-tip="Square boxes — box drags keep width and height equal (the larger drag dimension wins)">
+						<input type="checkbox" data-draw="box-square" />
+						<span>Square</span>
+					</label>
+					<label class="header-toggle" data-tip="Angle snap — rotation moves in 15° steps and releasing adds no spin">
+						<input type="checkbox" data-draw="angle-snap" />
+						<span>∠Snap</span>
+					</label>
 				</div>
 			</header>
 			<nav id="tool-rail" aria-label="Tools">

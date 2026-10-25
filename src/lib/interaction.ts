@@ -47,6 +47,7 @@ import {
 	MIN_SHAPE_HALF_SIZE,
 	pickBody,
 	ROTATE_FLING_MAX_RAD_S,
+	snapAngle,
 	TOOL_KEYS,
 	type ToolId,
 	type ToolSession,
@@ -332,6 +333,11 @@ export interface ToolEventsDeps {
 	 * material (P3-T2, PRD D20). Read per spawn; defaults to ink.
 	 */
 	activeMaterialId?: () => string;
+	/**
+	 * Angle snap (draw options): while true the rotate gesture quantizes the
+	 * pose to 15° steps and the release fling is suppressed. Read per move.
+	 */
+	angleSnap?: () => boolean;
 	/**
 	 * A mutation boundary completed: snapshot for undo (shape commit, delete,
 	 * duplicate, label commit, move-end, rotate-end). Called after applying.
@@ -622,6 +628,7 @@ export function createToolEvents(
 			if (
 				angularVelocity !== undefined &&
 				!deps?.isPaused?.() &&
+				!(deps?.angleSnap?.() ?? false) &&
 				Math.abs(angularVelocity) <= ROTATE_FLING_MAX_RAD_S
 			) {
 				for (const id of selectedIds()) {
@@ -646,12 +653,17 @@ export function createToolEvents(
 			// Rotation overrides are kinematic; works paused or running.
 		},
 		onRotate(delta) {
+			// Angle snap (draw options): the ABSOLUTE pose quantizes to 15°
+			// steps, so an arbitrary prior rotation lands exactly on the grid.
+			const snapStep = deps?.angleSnap?.() ?? false;
 			for (const [id, base] of this.rotateBase) {
-				if (world.bodies.has(id)) world.rotateBody(id, base + delta);
+				const target = base + delta;
+				const applied = snapStep ? snapAngle(target) : target;
+				if (world.bodies.has(id)) world.rotateBody(id, applied);
 				else {
 					const e = world.doc.get(id);
 					if (e && (e.kind === "body" || e.kind === "label"))
-						world.doc.setTransform(id, e.x, e.y, base + delta);
+						world.doc.setTransform(id, e.x, e.y, applied);
 				}
 			}
 		},

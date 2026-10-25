@@ -12,6 +12,7 @@ import { attachCameraControls } from "./lib/camera-controls";
 import { SIM_SPEED_FACTOR, SimClock } from "./lib/clock";
 import { installDebugApi } from "./lib/debug-api";
 import { buildDemoScene, demoSceneBounds } from "./lib/demo-scene";
+import { attachDrawOptions } from "./lib/draw-options";
 import { markDemoSceneSeen, shouldLoadDemoScene } from "./lib/first-run";
 import {
 	attachToolControls,
@@ -408,6 +409,8 @@ void (async () => {
 		isStaticSpawn: () => session?.staticMode ?? false,
 		// Active material for new shapes (D20): the panel sets it; read per spawn.
 		activeMaterialId: () => activeMaterialId,
+		// Angle snap (draw options): the rotate gesture reads it per move.
+		angleSnap: () => session?.angleSnap ?? false,
 		recordAction: () => undoStack.commit(),
 		beginAction: () => undoStack.beginAction(),
 		cancelAction: () => undoStack.cancelAction(),
@@ -430,6 +433,9 @@ void (async () => {
 	if (debugEnabled) simClock.setPaused(true);
 	const topBar = document.querySelector<HTMLElement>("#top-bar");
 	if (!topBar) throw new Error("#top-bar missing from index.html");
+	// Header draw options (grid/snap/center/square/angle-snap): plain session
+	// fields + the renderer's grid spacing; nothing else to wire.
+	attachDrawOptions({ host: topBar, session, renderer });
 	// Demo / New-empty-world scene actions (P4-T5, D16): loading the demo
 	// replaces the scene through the ordinary restoreSnapshot path and seeds
 	// a fresh undo history from it; an empty world is the same teardown the

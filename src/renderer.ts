@@ -12,6 +12,7 @@ import type { Camera } from "./lib/camera";
 import type { JointType } from "./lib/joint";
 import { jointGlyphRadius } from "./lib/joint";
 import {
+	DEFAULT_GRID_SIZE,
 	type DrawPreview,
 	effectiveLabelFontSize,
 	labelBounds,
@@ -83,6 +84,8 @@ export interface Renderer {
 	resize(cssWidth: number, cssHeight: number): void;
 	start(): void;
 	stop(): void;
+	/** Grid spacing in world units (draw options); drawn lines are its ×2ᵏ multiples. */
+	gridSize: number;
 }
 
 export interface RendererOptions {
@@ -172,6 +175,8 @@ export function createRenderer(
 	let cssWidth = 0;
 	let cssHeight = 0;
 	let rafId = 0;
+	/** User grid size in world units (draw options); drawn lines are its ×2ᵏ multiples. */
+	let gridSpacingUser = DEFAULT_GRID_SIZE;
 
 	function resize(cssWidthNew: number, cssHeightNew: number): void {
 		cssWidth = cssWidthNew;
@@ -208,7 +213,9 @@ export function createRenderer(
 
 		// Coarsen the grid spacing until lines are far enough apart on screen,
 		// then fade the fine level by how close it sits to the density limit.
-		let spacing = GRID_BASE_SPACING;
+		// The base is the user's grid size (draw options), so drawn lines are
+		// always multiples of the snapping spacing.
+		let spacing = Math.max(gridSpacingUser, GRID_BASE_SPACING);
 		while (spacing * zoom < MIN_GRID_PX) spacing *= 2;
 		const spacingPx = spacing * zoom;
 		const fade = Math.min(
@@ -989,6 +996,14 @@ export function createRenderer(
 				cancelAnimationFrame(rafId);
 				rafId = 0;
 			}
+		},
+		get gridSize() {
+			return gridSpacingUser;
+		},
+		set gridSize(v: number) {
+			// Clamp to the smallest coarsening base so the drawn grid and the
+			// snapping always share one spacing.
+			gridSpacingUser = Math.max(GRID_BASE_SPACING, v);
 		},
 	};
 }
