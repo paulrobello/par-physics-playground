@@ -27,8 +27,18 @@ export const ROPE_SEGMENT_RADIUS = 0.6;
  * 20% is enough droop for a visible bridge sag without a floppy hang.
  */
 export const ROPE_LINK_SLACK = 1.2;
-/** Max segments one drawn chain may have (≈126 world units of rope). */
-export const ROPE_MAX_SEGMENTS_PER_CHAIN = 64;
+/**
+ * Floor on the uniform bead step a chain may plan: the bead diameter is
+ * 2·ROPE_SEGMENT_RADIUS = 1.2, so any planned step below ~1.6 leaves beads
+ * nearly touching — the "very short rope creates cramped joints" bug (Paul,
+ * 2026-10-25). The planner never subdivides past this step; ropes shorter
+ * than one nominal link are refused instead.
+ */
+export const ROPE_MIN_LINK_STEP = 1.6;
+/** A stroke shorter than one nominal link is not a rope (refused). */
+export const ROPE_MIN_CHAIN_LENGTH = ROPE_SEGMENT_SPACING;
+/** Max segments one drawn chain may have (≈254 world units of rope). */
+export const ROPE_MAX_SEGMENTS_PER_CHAIN = 128;
 /**
  * Max rope segment bodies in the whole scene. Provisional D17 guard, raised
  * from 192 to 384 for the PRD G7 scale target: the P5-T3 1000-body stress
@@ -80,13 +90,16 @@ export function countRopeSegmentIds(ids: readonly string[]): number {
 }
 
 /**
- * Uniform arc-length resampling of a polyline: `count` samples spaced
- * `total/step` apart, INCLUDING both endpoints, so a drawn stroke becomes
- * evenly sized rope links regardless of how the pointer sampled it.
+ * Uniform arc-length resampling of a polyline: `count` samples evenly spaced
+ * INCLUDING both endpoints, so a drawn stroke becomes evenly sized rope
+ * links regardless of how the pointer sampled it. `count` defaults to the
+ * nominal-spacing derivation (round(total/spacing)+1); buildRopeChain passes
+ * an explicit count to hold the minimum-step floor.
  */
 export function resamplePolyline(
 	points: readonly Vec2[],
 	spacing: number,
+	count?: number,
 ): Vec2[] {
 	if (points.length === 0) return [];
 	if (points.length === 1) return [{ ...(points[0] as Vec2) }];
@@ -100,12 +113,12 @@ export function resamplePolyline(
 		total += len;
 	}
 	if (!(spacing > 0) || total === 0) return [{ ...(points[0] as Vec2) }];
-	const count = Math.max(2, Math.round(total / spacing) + 1);
-	const step = total / (count - 1);
+	const n = Math.max(2, count ?? Math.round(total / spacing) + 1);
+	const step = total / (n - 1);
 	const out: Vec2[] = [];
 	let seg = 0;
 	let consumed = 0;
-	for (let k = 0; k < count; k++) {
+	for (let k = 0; k < n; k++) {
 		const target = Math.min(k * step, total);
 		while (
 			seg < segLens.length &&
@@ -146,10 +159,12 @@ export type RopeChainResult =
 	  };
 
 /**
- * Plan a rope chain from stroke points: resample at the segment spacing and
- * enforce the D17 provisional caps — per-chain segments and total segments
- * across the scene. A refused chain is NOT placed (the caller drops its undo
- * snapshot and surfaces the reason visibly).
+ * Plan a rope chain from stroke points: resample EVENLY with a floor on the
+ * bead step (never sub-divide past ROPE_MIN_LINK_STEP — the cramped-joints
+ * bug), and enforce the D17 provisional caps — per-chain segments and total
+ * segments across the scene. Ropes shorter than ROPE_MIN_CHAIN_LENGTH are
+ * refused. A refused chain is NOT placed (the caller drops its undo snapshot
+ * and surfaces the reason visibly).
  */
 export function buildRopeChain(
 	points: readonly Vec2[],
@@ -165,11 +180,28 @@ export function buildRopeChain(
 	const maxPerChain = opts.maxPerChain ?? ROPE_MAX_SEGMENTS_PER_CHAIN;
 	const maxTotal = opts.maxTotal ?? ROPE_MAX_TOTAL_SEGMENTS;
 	const existingTotal = opts.existingTotal ?? 0;
-	const segments = resamplePolyline(points, spacing);
-	if (segments.length < 2) return { ok: false, reason: "too-short" };
+	let total = 0;
+	for (let i = 1; i < points.length; i++) {
+		const a = points[i - 1] as Vec2;
+		const b = points[i] as Vec2;
+		total += Math.hypot(b.x - a.x, b.y - a.y);
+	}
+	if (points.length < 2 || total < ROPE_MIN_CHAIN_LENGTH) {
+		return { ok: false, reason: "too-short" };
+	}
+	// Two step bounds, take the smaller count (the roomier beads): never
+	// sub-divide past the min step, never more samples than nominal spacing
+	// suggests — so a SHORT stroke yields FEWER, farther-apart beads instead
+	// of cramped ones.
+	const count = Math.min(
+		Math.floor(total / ROPE_MIN_LINK_STEP) + 1,
+		Math.round(total / spacing) + 1,
+	);
+	const segments = resamplePolyline(points, spacing, Math.max(2, count));
 	if (segments.length > maxPerChain) return { ok: false, reason: "per-chain" };
 	if (existingTotal + segments.length > maxTotal) {
 		return { ok: false, reason: "total" };
 	}
-	return { ok: true, segments, linkLength: spacing * ROPE_LINK_SLACK };
+	const step = total / (segments.length - 1);
+	return { ok: true, segments, linkLength: step * ROPE_LINK_SLACK };
 }

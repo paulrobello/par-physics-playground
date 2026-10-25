@@ -473,15 +473,16 @@ test("rope caps reject excess placement visibly; the joint tool draws a rope str
 	await expect(page.locator("#ppg-notice")).toContainText("384 rope segments");
 
 	// --- Per-chain cap, on a fresh page (the toast persists ~3 s): one
-	// 200-unit stroke would be 101 segments — over the 64 per-chain cap.
+	// 300-unit stroke would be 151 segments — over the 128 per-chain cap
+	// (raised from 64 — Paul, 2026-10-25).
 	await page.goto("/?debug=1");
 	await page.waitForFunction(() => window.__ppg !== undefined);
 	const perChain = await page.evaluate(() =>
 		window.__ppg?.spawnRope?.([
-			{ x: -100, y: -200 },
-			{ x: 100, y: -200 },
+			{ x: -150, y: -200 },
+			{ x: 150, y: -200 },
 		]),
 	);
 	expect(perChain).toBeNull();
-	await expect(page.locator("#ppg-notice")).toContainText("64 segments");
+	await expect(page.locator("#ppg-notice")).toContainText("128 segments");
 });

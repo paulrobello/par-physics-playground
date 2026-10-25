@@ -237,8 +237,8 @@ describe("rope chain math", () => {
 			{ x: 0, y: 0 },
 			{ x: len, y: 0 },
 		];
-		// 200 units → 101 segments: over the 64-segment per-chain cap.
-		expect(buildRopeChain(line(200))).toEqual({
+		// 300 units → 151 segments: over the 128-segment per-chain cap.
+		expect(buildRopeChain(line(300))).toEqual({
 			ok: false,
 			reason: "per-chain",
 		});
@@ -251,6 +251,33 @@ describe("rope chain math", () => {
 			ok: false,
 			reason: "too-short",
 		});
+		// Sub-link strokes are refused, not crammed (the cramped-joints bug).
+		expect(buildRopeChain(line(1))).toEqual({
+			ok: false,
+			reason: "too-short",
+		});
+		// A 4-unit stroke: 3 beads 2 apart (the nominal spacing), not 2 cramped.
+		const short = buildRopeChain(line(4));
+		expect(short.ok).toBe(true);
+		if (short.ok) {
+			expect(short.segments).toEqual([
+				{ x: 0, y: 0 },
+				{ x: 2, y: 0 },
+				{ x: 4, y: 0 },
+			]);
+			expect(short.linkLength).toBeCloseTo(2.4);
+		}
+		// A 3-unit stroke: 2 beads 3 apart — fewer beads, farther apart, never
+		// cramped (Paul's very-short-rope report).
+		const tiny = buildRopeChain(line(3));
+		expect(tiny.ok).toBe(true);
+		if (tiny.ok) {
+			expect(tiny.segments).toEqual([
+				{ x: 0, y: 0 },
+				{ x: 3, y: 0 },
+			]);
+			expect(tiny.linkLength).toBeCloseTo(3.6);
+		}
 		const ok = buildRopeChain(line(120), { existingTotal: 100 });
 		expect(ok.ok).toBe(true);
 		if (ok.ok) expect(ok.segments.length).toBe(61);
