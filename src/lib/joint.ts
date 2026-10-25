@@ -54,7 +54,10 @@ export type JointParams =
 			 * Contacts-off marker for ROPE CAPTURE pins (P4-T4): the captured
 			 * end segment usually sits half inside its capture target, so the
 			 * bead/target contact pair is disabled — the pin does the holding.
-			 * Ordinary tool-placed pins leave it unset (contacts on).
+			 * Save-compat: TWO-BODY pins now default to contacts-off (spawnJoint,
+			 * the pinned-circle stall regression) regardless of this flag, and
+			 * world-anchored pins default to contacts-on; the flag still forces
+			 * contacts off for a world-anchored capture pin.
 			 */
 			readonly contactsOff?: boolean;
 	  }

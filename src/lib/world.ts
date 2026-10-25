@@ -635,16 +635,23 @@ export class PhysicsWorld {
 			);
 		}
 		// Rail/axle/link semantics: a slider's rider overlaps its rail, a
-		// motorized wheel overlaps its mount, rope links' neighbors touch, and
-		// a rope capture pin's bead sits half inside its target — contacts
-		// between the jointed pair are off in all four cases; the constraint
+		// motorized wheel overlaps its mount, a two-body pin's pair overlaps
+		// (wheel on mount, axle in a socket), and rope links' neighbors touch,
+		// plus a rope capture pin's bead sits half inside its target — contacts
+		// between the jointed pair are off in all these cases; the constraint
 		// does the constraining, not contact resolution (the measured Rapier
-		// quirk from P4-T2/T3, extended to the rope in P4-T4).
+		// quirk from P4-T2/T3, extended to the rope in P4-T4 and to two-body
+		// pins by the pinned-circle stall regression: overlap contact impulses
+		// dwarf any drive and lock the joint, tests/unit/joint-pin-contacts).
+		// A WORLD-ANCHORED pin (bodyB null → the ground body) keeps contacts —
+		// the pinned body must still hit the floor — unless its params carry
+		// the explicit rope-capture contactsOff flag.
 		const contactsOff =
 			entity.params.kind === "slider" ||
 			entity.params.kind === "motor" ||
 			entity.params.kind === "rope" ||
-			(entity.params.kind === "pin" && entity.params.contactsOff === true);
+			(entity.params.kind === "pin" &&
+				(entity.bodyB !== null || entity.params.contactsOff === true));
 		if (contactsOff) joint.setContactsEnabled(false);
 		this.doc.add(entity);
 		this.joints.set(entity.id, joint);
