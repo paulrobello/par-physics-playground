@@ -267,7 +267,7 @@ const sceneView = {
 		if (!w) return;
 		w.eachThrusterEntity((t) => {
 			const pose = w.thrusterPose(t);
-			if (pose) fn(t.id, pose.x, pose.y, pose.angle, t.on);
+			if (pose) fn(t.id, pose.x, pose.y, pose.angle, w.thrusterFiring(t.id));
 		});
 	},
 	preview() {
@@ -520,6 +520,7 @@ void (async () => {
 		circleFromCenter: settings.circleFromCenter,
 		constrainBox: settings.constrainBox,
 		angleSnap: settings.angleSnap,
+		xRay: settings.xRay,
 	});
 	// Bottom status bar: per-tool help + live scene census + FPS toggle.
 	const statusBarEl = document.querySelector<HTMLElement>("#status-bar");

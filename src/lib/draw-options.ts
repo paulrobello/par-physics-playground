@@ -15,6 +15,8 @@ export interface DrawOptionValues {
 	circleFromCenter: boolean;
 	constrainBox: boolean;
 	angleSnap: boolean;
+	/** View option: bodies draw translucent so occluded shapes stay visible. */
+	xRay: boolean;
 }
 
 export interface DrawOptionsDeps {
@@ -61,13 +63,15 @@ export function attachDrawOptions(deps: DrawOptionsDeps): DrawOptionsHandle {
 	const angleSnap = deps.host.querySelector<HTMLInputElement>(
 		'[data-draw="angle-snap"]',
 	);
+	const xRay = deps.host.querySelector<HTMLInputElement>('[data-draw="x-ray"]');
 	if (
 		!gridSize ||
 		!gridSizeOut ||
 		!gridSnap ||
 		!circleCenter ||
 		!boxSquare ||
-		!angleSnap
+		!angleSnap ||
+		!xRay
 	)
 		throw new Error("draw-option controls missing from the top bar");
 
@@ -96,6 +100,10 @@ export function attachDrawOptions(deps: DrawOptionsDeps): DrawOptionsHandle {
 			deps.session.angleSnap = values.angleSnap;
 			angleSnap.checked = values.angleSnap;
 		}
+		if (values.xRay !== undefined) {
+			deps.renderer.xRay = values.xRay;
+			xRay.checked = values.xRay;
+		}
 	};
 
 	/** A user change: apply, then hand the full values to persistence. */
@@ -107,6 +115,7 @@ export function attachDrawOptions(deps: DrawOptionsDeps): DrawOptionsHandle {
 			circleFromCenter: deps.session.circleFromCenter,
 			constrainBox: deps.session.constrainBox,
 			angleSnap: deps.session.angleSnap,
+			xRay: deps.renderer.xRay,
 		});
 	};
 
@@ -128,6 +137,9 @@ export function attachDrawOptions(deps: DrawOptionsDeps): DrawOptionsHandle {
 	});
 	angleSnap.addEventListener("change", () => {
 		commit({ angleSnap: angleSnap.checked });
+	});
+	xRay.addEventListener("change", () => {
+		commit({ xRay: xRay.checked });
 	});
 
 	return { apply };

@@ -99,6 +99,8 @@ export interface Renderer {
 	stop(): void;
 	/** Grid spacing in world units (draw options); drawn lines are its ×2ᵏ multiples. */
 	gridSize: number;
+	/** X-ray mode (Paul, 2026-10-25): bodies draw translucent (view option). */
+	xRay: boolean;
 }
 
 export interface RendererOptions {
@@ -190,6 +192,10 @@ export function createRenderer(
 	let rafId = 0;
 	/** User grid size in world units (draw options); drawn lines are its ×2ᵏ multiples. */
 	let gridSpacingUser = DEFAULT_GRID_SIZE;
+	/** X-ray mode: bodies draw translucent so occluded shapes stay visible. */
+	let xRayMode = false;
+	/** X-ray body alpha — a ghost, but still readable. */
+	const X_RAY_ALPHA = 0.3;
 
 	function resize(cssWidthNew: number, cssHeightNew: number): void {
 		cssWidth = cssWidthNew;
@@ -439,6 +445,10 @@ export function createRenderer(
 			ctx.save();
 			ctx.translate(x, y);
 			ctx.rotate(rot);
+			// X-ray (Paul, 2026-10-25): the whole pre-rendered sprite — fill,
+			// stroke, shadow — draws translucent, so shapes underneath stay
+			// visible; selection outlines keep full strength above.
+			if (xRayMode) ctx.globalAlpha = X_RAY_ALPHA;
 			ctx.drawImage(
 				sprite.canvas,
 				-sprite.halfW,
@@ -1054,6 +1064,12 @@ export function createRenderer(
 			// Clamp to the smallest coarsening base so the drawn grid and the
 			// snapping always share one spacing.
 			gridSpacingUser = Math.max(GRID_BASE_SPACING, v);
+		},
+		get xRay() {
+			return xRayMode;
+		},
+		set xRay(v: boolean) {
+			xRayMode = v;
 		},
 	};
 }
