@@ -501,7 +501,9 @@ void (async () => {
 		onStaticModeChange: (on) => save({ staticMode: on }),
 	});
 	// Debug mode must pause the clock BEFORE the sim controls attach, so the
-	// pause button's initial aria state reflects the paused clock.
+	// pause button's initial aria state reflects the paused clock. A stored
+	// pause restores first; the debug force-pause still wins in debug mode.
+	if (settings.paused) simClock.setPaused(true);
 	if (debugEnabled) simClock.setPaused(true);
 	const topBar = document.querySelector<HTMLElement>("#top-bar");
 	if (!topBar) throw new Error("#top-bar missing from index.html");
@@ -584,6 +586,7 @@ void (async () => {
 		world: w,
 		timeScale,
 		isEditingText: () => session?.isEditingText() ?? false,
+		onPauseChange: (paused) => save({ paused }),
 		// Cancel any active drag first so its mouse joint is removed before the
 		// registry teardown drops the body it references.
 		onReset: clearWorld,

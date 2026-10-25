@@ -27,6 +27,8 @@ export interface PersistedSettings {
 	staticMode: boolean;
 	/** Status-bar FPS readout visibility. */
 	fpsVisible: boolean;
+	/** Paused/running toggle (Paul, 2026-10-25): restored before the sim controls attach. */
+	paused: boolean;
 	/** X-ray view: bodies draw translucent so occluded shapes stay visible. */
 	xRay: boolean;
 	/** Active tool. */
@@ -56,6 +58,7 @@ export const DEFAULT_SETTINGS: PersistedSettings = {
 	angleSnap: false,
 	staticMode: false,
 	fpsVisible: false,
+	paused: false,
 	xRay: false,
 	tool: "select",
 };
@@ -117,6 +120,7 @@ export function loadSettings(storage: SettingsStorage): PersistedSettings {
 		angleSnap: bool(raw.angleSnap, DEFAULT_SETTINGS.angleSnap),
 		staticMode: bool(raw.staticMode, DEFAULT_SETTINGS.staticMode),
 		fpsVisible: bool(raw.fpsVisible, DEFAULT_SETTINGS.fpsVisible),
+		paused: bool(raw.paused, DEFAULT_SETTINGS.paused),
 		xRay: bool(raw.xRay, DEFAULT_SETTINGS.xRay),
 		tool:
 			typeof raw.tool === "string" && isToolId(raw.tool)

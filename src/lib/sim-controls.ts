@@ -139,6 +139,8 @@ export interface SimControlsDeps {
 	/** Clears dynamic bodies; the caller cancels any active drag first. */
 	onReset: () => void;
 	isEditingText?: () => boolean;
+	/** Fired after the pause toggle flips — the settings save hook. */
+	onPauseChange?: ((paused: boolean) => void) | undefined;
 }
 
 /** Attaches click + keyboard wiring to the top-bar cluster. Returns a cleanup. */
@@ -192,6 +194,7 @@ export function attachSimControls(deps: SimControlsDeps): () => void {
 	const togglePause = (): void => {
 		clock.setPaused(!clock.isPaused);
 		syncPause();
+		deps.onPauseChange?.(clock.isPaused);
 	};
 
 	const stepOnce = (): void => clock.stepOnce();
