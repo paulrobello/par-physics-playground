@@ -966,7 +966,13 @@ export class ToolSession {
 		if (this.phase.kind !== "idle") this.cancel();
 		this.jointKind = kind;
 	}
-	/** Body under the pointer (hover), updated by pointerMove when idle. */
+	/**
+	 * Body under the pointer (hover). Invariant: pointerMove keeps this
+	 * tracking the pointer-picked body in every phase — placement flows
+	 * included, so the center helper marks the joint/rope anchor candidate —
+	 * except while rotating or dragging, where the pressed body stays the
+	 * hover target and moves over other bodies must not steal it.
+	 */
 	hoverId: string | undefined;
 	/** Currently selected bodies, in no particular order. */
 	selectedIds: Set<string> = new Set();
@@ -1724,6 +1730,11 @@ export class ToolSession {
 		zoom?: number,
 	): void {
 		if (zoom !== undefined) this.lastZoom = zoom;
+		// Hover tracking runs before the per-phase dispatch: only an active
+		// rotate or drag pins the hover to the pressed body (see hoverId).
+		if (this.phase.kind !== "rotating" && this.phase.kind !== "dragging") {
+			this.hoverId = this.pick(wx, wy);
+		}
 		if (this.phase.kind === "drawing") {
 			const snapped = this.snapPoint(wx, wy);
 			this.phase = { ...this.phase, curX: snapped.x, curY: snapped.y };
@@ -1796,7 +1807,6 @@ export class ToolSession {
 			this.events.onDragMove({ x: wx, y: wy });
 			return;
 		}
-		this.hoverId = this.pick(wx, wy);
 	}
 
 	pointerUp(zoom?: number): void {

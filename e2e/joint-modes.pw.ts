@@ -148,3 +148,62 @@ test("hovering a body shows its center marker", async ({ page }) => {
 	);
 	expect(diff).toBeGreaterThan(12);
 });
+
+test("center marker tracks the hovered body during joint placement", async ({
+	page,
+}) => {
+	await page.goto("/?debug=1");
+	await page.waitForFunction(() => window.__ppg !== undefined);
+	await page.waitForTimeout(300); // canvas/layout settle
+
+	await page.evaluate(() => {
+		const ppg = window.__ppg!;
+		ppg.spawnBox("anchor", 100, -450, 25, 25, "wood", true);
+		ppg.spawnBox("target", 400, -450, 25, 25, "wood", true);
+	});
+	await page.locator('[data-tool="joint"]').click();
+
+	// First click arms the joint on the anchor; the flow phase is now
+	// non-idle for everything that follows.
+	const anchorPt = await toScreen(page, 100, -450);
+	await page.mouse.click(anchorPt.x, anchorPt.y);
+
+	const sampleAt = (wx: number, wy: number) =>
+		page.evaluate(
+			({ x, y }) => {
+				const ctx = document
+					.querySelector<HTMLCanvasElement>("#stage")!
+					.getContext("2d")!;
+				const cam = window.__ppg!.cameraState();
+				const dpr = window.devicePixelRatio;
+				const d = ctx.getImageData(
+					Math.round((x * cam.zoom + cam.offsetX) * dpr),
+					Math.round((y * cam.zoom + cam.offsetY) * dpr),
+					1,
+					1,
+				).data;
+				return [d[0]!, d[1]!, d[2]!];
+			},
+			{ x: wx, y: wy },
+		);
+
+	const targetPt = await toScreen(page, 400, -450);
+	// Pointer parked on empty space: the target body's center shows plain fill.
+	await page.mouse.move(targetPt.x + 120, targetPt.y + 150);
+	await page.waitForTimeout(120);
+	const plain = await sampleAt(400, -450);
+	// Hover the second body while the joint is still armed: the crosshair
+	// marker must track the pointer-picked body mid-flow. The hover lands
+	// OFF-center (still inside the body) so the placement preview line ends
+	// beside the sampled center — the pixel can only change via the marker.
+	const hoverPt = await toScreen(page, 400, -430);
+	await page.mouse.move(hoverPt.x, hoverPt.y);
+	await page.waitForTimeout(120);
+	const marked = await sampleAt(400, -450);
+	const diff = Math.max(
+		Math.abs(marked[0]! - plain[0]!),
+		Math.abs(marked[1]! - plain[1]!),
+		Math.abs(marked[2]! - plain[2]!),
+	);
+	expect(diff).toBeGreaterThan(12);
+});

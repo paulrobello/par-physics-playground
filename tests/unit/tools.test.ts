@@ -323,6 +323,30 @@ describe("ToolSession — tool change terminates gestures (F4)", () => {
 	});
 });
 
+describe("ToolSession — hover invariant", () => {
+	test("joint-arming: hover tracks the second-click candidate mid-flow", () => {
+		const pickAt = (x: number, y: number) =>
+			x === 0 && y === 0 ? "b1" : x === 40 && y === 0 ? "b2" : undefined;
+		const { session } = makeSession(pickAt);
+		session.setTool("joint");
+		session.pointerDown(0, 0); // arms the pin on b1 — flow phase non-idle
+		session.pointerMove(40, 0); // hover the second-click candidate
+		expect(session.hoverId).toBe("b2");
+		session.pointerMove(999, 999); // off bodies: the hover clears
+		expect(session.hoverId).toBeUndefined();
+	});
+
+	test("dragging pins the hover to the pressed body", () => {
+		const pickAt = (x: number, y: number) =>
+			x === 5 && y === 5 ? "b1" : undefined;
+		const { session } = makeSession(pickAt);
+		session.pointerMove(5, 5); // idle move: hover lands on b1, then press
+		session.pointerDown(5, 5);
+		session.pointerMove(400, 400); // pointer leaves the pressed body mid-drag
+		expect(session.hoverId).toBe("b1");
+	});
+});
+
 describe("ToolSession — cancel semantics (F6)", () => {
 	test("cancel during a drag, then release, ends the drag exactly once", () => {
 		const pickHit = (x: number, y: number) =>
