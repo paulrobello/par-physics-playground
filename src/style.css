@@ -80,10 +80,11 @@ output {
 #app {
 	display: grid;
 	grid-template-columns: 48px 1fr 280px;
-	grid-template-rows: 40px 1fr;
+	grid-template-rows: 40px 1fr 26px;
 	grid-template-areas:
 		"top-bar top-bar top-bar"
-		"tool-rail stage context";
+		"tool-rail stage context"
+		"status status status";
 	height: 100vh;
 }
 
@@ -102,6 +103,54 @@ output {
 	font-size: 13px;
 	font-weight: 600;
 	letter-spacing: -0.01em;
+	color: var(--hud-text);
+}
+
+#status-bar {
+	grid-area: status;
+	display: flex;
+	align-items: center;
+	gap: 12px;
+	padding: 0 12px;
+	background: var(--panel-bg);
+	border-top: 1px solid var(--panel-border);
+	font-size: 11px;
+	color: var(--hud-text-secondary);
+	min-width: 0;
+}
+
+#status-help {
+	flex: 1 1 auto;
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+#status-stats {
+	flex: none;
+	font-variant-numeric: tabular-nums;
+	white-space: nowrap;
+}
+
+#fps-toggle {
+	flex: none;
+	padding: 2px 8px;
+	font-size: 10px;
+	letter-spacing: 0.04em;
+}
+
+#fps-toggle[aria-pressed="true"] {
+	color: var(--hud-text);
+	border-color: var(--accent);
+	box-shadow: var(--glow-accent);
+}
+
+#status-fps {
+	flex: none;
+	min-width: 52px;
+	text-align: right;
+	font-variant-numeric: tabular-nums;
 	color: var(--hud-text);
 }
 

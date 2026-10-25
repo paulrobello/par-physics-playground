@@ -156,6 +156,12 @@
 			<main id="stage-area">
 				<canvas id="stage"></canvas>
 			</main>
+			<footer id="status-bar">
+				<span id="status-help" aria-live="polite"></span>
+				<span id="status-stats"></span>
+				<button type="button" id="fps-toggle" aria-pressed="false" data-tip="Toggle the render FPS readout">FPS</button>
+				<span id="status-fps" hidden></span>
+			</footer>
 			<aside id="context-panel" aria-label="Context panel"></aside>
 		</div>
 		<script type="module" src="/src/main.ts"></script>

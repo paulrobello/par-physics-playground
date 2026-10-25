@@ -35,6 +35,7 @@ import { SceneStore } from "./lib/scene-store";
 import { attachSceneUI } from "./lib/scene-ui";
 import { attachSimControls, TimeScale } from "./lib/sim-controls";
 import { createSimPump } from "./lib/sim-pump";
+import { attachStatusBar, type StatusBar } from "./lib/status-bar";
 import {
 	bodiesInRect,
 	type PickableBody,
@@ -60,6 +61,8 @@ let clock: SimClock | null = null;
 let refreshJointPanel: (() => void) | null = null;
 /** Per-frame refresh for the label properties section (set at panel attach). */
 let refreshLabelPanel: (() => void) | null = null;
+/** The bottom status bar (help + census + FPS); built at boot. */
+let statusBar: StatusBar | null = null;
 /** Demo-boot camera fit: set by the boot branch, applied after ALL panels attach. */
 let demoBooted = false;
 let demoEntitiesForFit: Parameters<typeof fitCameraToScene>[0] | null = null;
@@ -324,12 +327,13 @@ attachTooltips();
 const renderer = createRenderer(canvas, {
 	camera,
 	scene: sceneView,
-	onFrame: () => {
+	onFrame: (dtSeconds) => {
 		// The pump consumed this frame's wall time already (or the fallback
 		// interval did — the pump makes double-feeding impossible).
 		simPump.pump();
 		refreshJointPanel?.();
 		refreshLabelPanel?.();
+		statusBar?.frame(dtSeconds);
 	},
 });
 attachCameraControls(
@@ -480,6 +484,10 @@ void (async () => {
 	// Header draw options (grid/snap/center/square/angle-snap): plain session
 	// fields + the renderer's grid spacing; nothing else to wire.
 	attachDrawOptions({ host: topBar, session, renderer });
+	// Bottom status bar: per-tool help + live scene census + FPS toggle.
+	const statusBarEl = document.querySelector<HTMLElement>("#status-bar");
+	if (!statusBarEl) throw new Error("#status-bar missing from index.html");
+	statusBar = attachStatusBar({ host: statusBarEl, world: w, session });
 	// Demo / New-empty-world scene actions (P4-T5, D16): loading the demo
 	// replaces the scene through the ordinary restoreSnapshot path and seeds
 	// a fresh undo history from it; an empty world is the same teardown the

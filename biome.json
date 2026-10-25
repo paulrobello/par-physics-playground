@@ -8,6 +8,16 @@
 		{
 			"includes": ["index.html"],
 			"linter": { "rules": { "a11y": { "noLabelWithoutControl": "off" } } }
+		},
+		{
+			"includes": ["src/style.css"],
+			"linter": {
+				"rules": {
+					"correctness": {
+						"noInvalidGridAreas": "off"
+					}
+				}
+			}
 		}
 	]
 }
