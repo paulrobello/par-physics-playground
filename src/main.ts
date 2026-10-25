@@ -280,9 +280,10 @@ const simPump = createSimPump(
 		// Time-scale (P3-T3) scales the pump's FEED only: the fixed 60Hz tick
 		// is unchanged, and the debug advanceTime path (which steps ticks
 		// directly) never sees the scale — determinism guard, pinned in e2e.
-		// SIM_SPEED_FACTOR doubles the nominal 1x: the world advances two
+		// SIM_SPEED_FACTOR quadruples the nominal 1x: the world advances four
 		// sim-seconds per wall second at the slider's 1.00 (Paul, 2026-10-24
-		// — real-time gravity read as slow motion at this world scale).
+		// — real-time gravity read as slow motion at this world scale;
+		// doubled once, then again the same day).
 		clock?.advanceRealTime(seconds * timeScale.value * SIM_SPEED_FACTOR);
 	},
 	() => performance.now(),

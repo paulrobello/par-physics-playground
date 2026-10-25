@@ -112,17 +112,17 @@ describe("SimClock", () => {
 });
 
 describe("wall-speed factor", () => {
-	test("the nominal 1x runs at double real time (SIM_SPEED_FACTOR = 2)", () => {
-		expect(SIM_SPEED_FACTOR).toBe(2);
+	test("the nominal 1x runs at quadruple real time (SIM_SPEED_FACTOR = 4)", () => {
+		expect(SIM_SPEED_FACTOR).toBe(4);
 	});
 
 	test("the catch-up cap holds factor + slider 2x with headroom", () => {
-		// A 100ms pump window at the factor = 0.2 sim-s = 12 ticks; the
-		// slider's 2x doubles it to 24 — the 48 cap covers both with margin.
+		// A 100ms pump window at the factor = 0.4 sim-s = 24 ticks; the
+		// slider's 2x doubles it to 48 — the 96 cap covers both with margin.
 		// (SimClock itself is factor-agnostic: the factor lives in the pump
 		// feed in main.ts.)
 		const clock = new SimClock();
-		expect(clock.maxCatchUpSteps).toBe(48);
+		expect(clock.maxCatchUpSteps).toBe(96);
 		clock.advanceRealTime(0.1);
 		expect(clock.tick).toBe(6); // 0.1s × 60 Hz — pure clock, no factor
 	});

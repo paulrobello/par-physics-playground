@@ -9,16 +9,16 @@ export const SIM_DT_SECONDS = 1 / SIM_TICK_HZ;
 
 /**
  * Wall-speed multiplier for the nominal 1×: the Speed slider's 1.00 advances
- * the world at SIM_SPEED_FACTOR × real time (two sim-seconds per wall
- * second at 2), so real-time gravity at this world's scale reads at a
- * natural pace instead of slow motion (Paul, 2026-10-24). Purely a WALL
- * feed-rate term: the 60 Hz tick and dt are untouched, and the debug
- * advanceTime path (which steps ticks directly) never sees it — the
- * determinism machinery is unaffected. The catch-up cap (48 ticks ≈ 0.8
- * sim-s per pump event) bounds the death-spiral case with headroom for the
- * factor and the slider's 2× on top.
+ * the world at SIM_SPEED_FACTOR × real time (four sim-seconds per wall
+ * second at 4), so real-time gravity at this world's scale reads at a
+ * natural pace instead of slow motion (Paul, 2026-10-24; doubled again the
+ * same day). Purely a WALL feed-rate term: the 60 Hz tick and dt are
+ * untouched, and the debug advanceTime path (which steps ticks directly)
+ * never sees it — the determinism machinery is unaffected. The catch-up
+ * cap (96 ticks ≈ 1.6 sim-s per pump event) bounds the death-spiral case
+ * with headroom for the factor and the slider's 2× on top.
  */
-export const SIM_SPEED_FACTOR = 2;
+export const SIM_SPEED_FACTOR = 4;
 
 export interface TickContext {
 	readonly tick: number;
@@ -43,7 +43,7 @@ export class SimClock {
 
 	constructor(options: SimClockOptions = {}) {
 		this.fixedDtSeconds = SIM_DT_SECONDS;
-		this.maxCatchUpSteps = options.maxCatchUpSteps ?? 48;
+		this.maxCatchUpSteps = options.maxCatchUpSteps ?? 96;
 		if (
 			!Number.isFinite(this.fixedDtSeconds) ||
 			this.fixedDtSeconds <= 0 ||
