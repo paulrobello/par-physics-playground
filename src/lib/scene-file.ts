@@ -41,6 +41,7 @@ export const SCENE_BOUNDS = {
 	maxLabelText: 200,
 	maxLabelSize: 512,
 	maxThrusterStrength: 1e7,
+	maxThrusterDuration: 600,
 } as const;
 
 /** Serialize the current document (entities + custom materials). */
@@ -162,6 +163,17 @@ function checkEntity(raw: unknown, index: number): string | null {
 				strength > SCENE_BOUNDS.maxThrusterStrength
 			) {
 				return `thruster ${String(e.id)} strength above ${SCENE_BOUNDS.maxThrusterStrength}`;
+			}
+			// Duration (thruster burn limit) is optional; when present it must
+			// be a positive number within the panel's clamp range.
+			const duration = (e as Record<string, unknown>).duration;
+			if (
+				duration !== undefined &&
+				(!isFiniteNumber(duration) ||
+					duration <= 0 ||
+					duration > SCENE_BOUNDS.maxThrusterDuration)
+			) {
+				return `thruster ${String(e.id)} duration must be within (0, ${SCENE_BOUNDS.maxThrusterDuration}]`;
 			}
 		}
 		if (e.kind === "label") {

@@ -6,7 +6,9 @@
 import { describe, expect, test } from "bun:test";
 import { makeJoint } from "../../src/lib/joint";
 import {
+	clampThrusterDuration,
 	THRUSTER_DEFAULT_STRENGTH,
+	THRUSTER_MAX_DURATION,
 	type ThrusterEntity,
 	thrusterWorldPose,
 } from "../../src/lib/thruster";
@@ -181,5 +183,46 @@ describe("thruster lifecycle", () => {
 		expect(world.jointEntities().map((j) => j.id)).toEqual(["j"]);
 		for (let i = 0; i < 30; i++) world.step();
 		expect(linvel(world, "tb")?.x ?? 0).toBeGreaterThan(13);
+	});
+});
+
+describe("thruster burn duration", () => {
+	test("clampThrusterDuration normalizes panel/scene values", () => {
+		expect(clampThrusterDuration(1.234)).toBe(1.23);
+		expect(clampThrusterDuration(1.2)).toBe(1.2);
+		expect(clampThrusterDuration(0.001)).toBe(0.01);
+		expect(clampThrusterDuration(999)).toBe(THRUSTER_MAX_DURATION);
+		expect(clampThrusterDuration(0)).toBeUndefined();
+		expect(clampThrusterDuration(-1)).toBeUndefined();
+		expect(clampThrusterDuration(Number.NaN)).toBeUndefined();
+	});
+
+	test("a thruster stops applying force once its duration burns out", async () => {
+		const world = await PhysicsWorld.create();
+		mountThruster(world, { duration: 0.05 });
+		// 0.05 s = 3 thrusting ticks, then coasting: velocity plateaus.
+		for (let i = 0; i < 6; i++) world.step();
+		const vx = linvel(world, "tb")?.x ?? 0;
+		expect(vx).toBeGreaterThan(0);
+		expect(world.thrusterFiring("th")).toBe(false);
+		for (let i = 0; i < 3; i++) world.step();
+		expect(linvel(world, "tb")?.x ?? 0).toBeCloseTo(vx, 9);
+
+		// A duration edit restarts the countdown: firing (and accelerating) again.
+		expect(world.updateThruster("th", { duration: 0.05 })).toBe(true);
+		expect(world.thrusterFiring("th")).toBe(true);
+		const before = linvel(world, "tb")?.x ?? 0;
+		for (let i = 0; i < 2; i++) world.step();
+		expect(linvel(world, "tb")?.x ?? 0).toBeGreaterThan(before);
+	});
+
+	test("restore replays the burn: the elapsed clock is sim state, not document data", async () => {
+		const world = await PhysicsWorld.create();
+		mountThruster(world, { duration: 0.05 });
+		for (let i = 0; i < 6; i++) world.step();
+		expect(world.thrusterFiring("th")).toBe(false);
+		world.restoreSnapshot(world.doc.all());
+		// The rebuilt world starts the burn window fresh.
+		expect(world.thrusterFiring("th")).toBe(true);
 	});
 });

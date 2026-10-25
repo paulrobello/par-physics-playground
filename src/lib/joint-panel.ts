@@ -11,7 +11,7 @@
  * or its data changes.
  */
 import { JOINT_TYPE_LABELS, type JointParams } from "./joint";
-import type { ThrusterEntity } from "./thruster";
+import { clampThrusterDuration, type ThrusterEntity } from "./thruster";
 import type { ToolSession } from "./tools";
 import type { UndoStack } from "./undo";
 import type { PhysicsWorld } from "./world";
@@ -81,7 +81,9 @@ export function attachJointPanel(deps: JointPanelDeps): () => void {
 	/** Apply a thruster edit inside ONE undo boundary. */
 	const applyThruster = (
 		id: string,
-		patch: Partial<Pick<ThrusterEntity, "strength" | "on" | "angle">>,
+		patch: Partial<
+			Pick<ThrusterEntity, "strength" | "on" | "angle" | "duration">
+		>,
 	): void => {
 		undo.beginAction();
 		world.updateThruster(id, patch);
@@ -247,6 +249,9 @@ export function attachJointPanel(deps: JointPanelDeps): () => void {
 			<label class="joint-field">Angle (°, body-local)
 				<input type="number" step="15" data-thruster-angle value="${angleDeg}" />
 			</label>
+			<label class="joint-field">Duration (s)
+				<input type="number" step="0.01" min="0" max="600" placeholder="∞" data-thruster-duration value="${entity.duration ?? ""}" />
+			</label>
 			<label class="joint-field">
 				<input type="checkbox" data-thruster-on ${entity.on ? "checked" : ""} />
 				Thrusting
@@ -265,6 +270,22 @@ export function attachJointPanel(deps: JointPanelDeps): () => void {
 				const value = (ev.target as HTMLInputElement).valueAsNumber;
 				if (Number.isFinite(value))
 					applyThruster(id, { angle: (value * Math.PI) / 180 });
+			});
+		// Duration (Paul, 2026-10-25): empty clears the limit (∞ placeholder);
+		// a value normalizes through clampThrusterDuration (2-decimal
+		// precision, 0.01–600 s) — undefined patches are a doc.replace with
+		// the field dropped, so the entity stays rebuild-exact.
+		paramsEl
+			.querySelector<HTMLInputElement>("[data-thruster-duration]")
+			?.addEventListener("change", (ev) => {
+				const input = ev.target as HTMLInputElement;
+				if (input.value.trim() === "") {
+					applyThruster(id, { duration: undefined });
+					return;
+				}
+				const value = clampThrusterDuration(input.valueAsNumber);
+				applyThruster(id, { duration: value });
+				if (value !== undefined) input.value = String(value);
 			});
 		paramsEl
 			.querySelector<HTMLInputElement>("[data-thruster-on]")

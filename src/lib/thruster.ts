@@ -24,6 +24,15 @@ export interface ThrusterEntity {
 	readonly strength: number;
 	/** On/off toggle; off applies no force (document data, rebuild-safe). */
 	readonly on: boolean;
+	/**
+	 * Burn-time limit in seconds (Paul, 2026-10-25): the thruster stops
+	 * applying force once it has thrusting-burned this long; undefined =
+	 * unlimited (the pre-duration behavior). Two-decimal precision. The
+	 * elapsed burn clock is SIM state, not document data — a saved scene
+	 * replays the full burn on load, pause freezes it, and a duration edit
+	 * restarts the countdown.
+	 */
+	readonly duration?: number | undefined;
 }
 
 /**
@@ -33,6 +42,22 @@ export interface ThrusterEntity {
  * hunk barely notices. Editable in the panel; tests pin the exact semantics.
  */
 export const THRUSTER_DEFAULT_STRENGTH = 10_000;
+
+/** Upper bound for a burn duration (10 minutes of thrust). */
+export const THRUSTER_MAX_DURATION = 600;
+
+/**
+ * Panel/scene normalization for a duration entry: non-finite, zero, or
+ * negative clears the limit (undefined); otherwise round to 2 decimals and
+ * clamp into [0.01, THRUSTER_MAX_DURATION].
+ */
+export function clampThrusterDuration(raw: number): number | undefined {
+	if (!Number.isFinite(raw) || raw <= 0) return undefined;
+	return Math.min(
+		Math.max(Math.round(raw * 100) / 100, 0.01),
+		THRUSTER_MAX_DURATION,
+	);
+}
 
 /** World-space pose of a thruster: its anchor point and thrust direction. */
 export interface ThrusterPose {

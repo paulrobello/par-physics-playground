@@ -27,6 +27,7 @@ async function richWorld(): Promise<PhysicsWorld> {
 		angle: 0,
 		strength: 5000,
 		on: true,
+		duration: 1.75,
 	};
 	world.spawnThruster(thruster);
 	return world;
@@ -218,6 +219,41 @@ describe("review fixes: id counters, atomicity, non-body bounds", () => {
 			on: true,
 		});
 		expect(validateSceneFile(file).ok).toBe(false);
+
+		// Thruster duration (optional): out-of-range values reject the scene.
+		const fileDur = JSON.parse(JSON.stringify(buildSceneFile(world.doc))) as {
+			entities: unknown[];
+		};
+		fileDur.entities.push({
+			kind: "thruster",
+			id: "t-dur",
+			bodyId: "box-1",
+			anchorX: 0,
+			anchorY: 0,
+			angle: 0,
+			strength: 5000,
+			on: true,
+			duration: 601,
+		});
+		expect(validateSceneFile(fileDur).ok).toBe(false);
+
+		const fileDurNeg = JSON.parse(
+			JSON.stringify(buildSceneFile(world.doc)),
+		) as {
+			entities: unknown[];
+		};
+		fileDurNeg.entities.push({
+			kind: "thruster",
+			id: "t-dur-neg",
+			bodyId: "box-1",
+			anchorX: 0,
+			anchorY: 0,
+			angle: 0,
+			strength: 5000,
+			on: true,
+			duration: -0.5,
+		});
+		expect(validateSceneFile(fileDurNeg).ok).toBe(false);
 
 		const file2 = JSON.parse(JSON.stringify(buildSceneFile(world.doc))) as {
 			entities: unknown[];

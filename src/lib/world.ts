@@ -138,6 +138,8 @@ export class PhysicsWorld {
 	private readonly contactEvents = new RAPIER.EventQueue(false);
 	/** Armed (brittle) collider handles → owning body id (impact lookup). */
 	private readonly brittleColliders = new Map<number, DocumentId>();
+	/** Elapsed thrusting burn time per thruster id (duration accounting). */
+	private readonly thrusterBurn = new Map<DocumentId, number>();
 	/**
 	 * Mints shatter-fragment ids. main.ts wires freshBodyId so fragments share
 	 * the body-id space and the scene-file id-counter sync covers restored
@@ -274,7 +276,11 @@ export class PhysicsWorld {
 		id: DocumentId,
 		patch: Partial<Omit<ThrusterEntity, "kind" | "id" | "bodyId">>,
 	): boolean {
-		return this.doc.updateThruster(id, patch);
+		const ok = this.doc.updateThruster(id, patch);
+		// A duration edit restarts the burn countdown (the predictable
+		// "fresh window" reading of an edit); clearing counts too.
+		if (ok && "duration" in patch) this.thrusterBurn.delete(id);
+		return ok;
 	}
 
 	/** Thruster entities mounted on body `id` (the removal cascade set). */
@@ -322,6 +328,15 @@ export class PhysicsWorld {
 	private applyThrusters(): void {
 		for (const thruster of this.doc.thrusters()) {
 			if (!thruster.on) continue;
+			// Burn duration (thruster.ts): a thruster with a limit stops once
+			// it has burned its seconds; the elapsed clock accumulates only on
+			// thrusting ticks, so pause freezes it. Any duration edit restarts
+			// the countdown (updateThruster drops the entry).
+			if (thruster.duration !== undefined) {
+				const burned = this.thrusterBurn.get(thruster.id) ?? 0;
+				if (burned >= thruster.duration) continue;
+				this.thrusterBurn.set(thruster.id, burned + SIM_DT_SECONDS);
+			}
 			const body = this.bodies.get(thruster.bodyId);
 			if (!body) continue;
 			const pose = this.thrusterPose(thruster);
@@ -336,6 +351,17 @@ export class PhysicsWorld {
 				true,
 			);
 		}
+	}
+
+	/**
+	 * Effective firing state (flame draw, debug): on AND within its burn
+	 * duration — a spent thruster reads as off without mutating the document.
+	 */
+	thrusterFiring(id: DocumentId): boolean {
+		const t = this.doc.get(id);
+		if (!t || t.kind !== "thruster" || !t.on) return false;
+		if (t.duration === undefined) return true;
+		return (this.thrusterBurn.get(id) ?? 0) < t.duration;
 	}
 
 	/**
@@ -899,6 +925,7 @@ export class PhysicsWorld {
 		// orphan force applicators pointing at a removed body.
 		for (const thruster of this.thrustersAttachedTo(id)) {
 			this.doc.remove(thruster.id);
+			this.thrusterBurn.delete(thruster.id);
 			this.onRemove?.(thruster.id);
 		}
 		const body = this.bodies.get(id);

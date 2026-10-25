@@ -152,9 +152,10 @@ export interface DebugApi {
 	 */
 	setJointParams(id: DocumentId, params: JointParams): boolean;
 	/**
-	 * Mount a thruster (P4-T5) on `bodyId` at world point (x, y), thrusting
-	 * at `angleDeg` degrees (y-down screen convention). Same document path as
-	 * the future tool placement will be; false when the body is missing.
+	 * Mount a thruster (P4-T5) on `bodyId` with a BODY-LOCAL anchor (x, y),
+	 * thrusting at `angleDeg` degrees (y-down screen convention). Same
+	 * document path as the future tool placement will be; false when the body
+	 * is missing.
 	 */
 	placeThruster(
 		id: DocumentId,
@@ -165,10 +166,10 @@ export interface DebugApi {
 		strength?: number,
 		on?: boolean,
 	): boolean;
-	/** Replace a thruster's mutable state (strength / on). False when refused. */
+	/** Replace a thruster's mutable state (strength / on / duration). */
 	setThrusterParams(
 		id: DocumentId,
-		patch: { strength?: number; on?: boolean },
+		patch: { strength?: number; on?: boolean; duration?: number | undefined },
 	): boolean;
 	/** All thruster ids, in document order. */
 	thrusterIds(): DocumentId[];
