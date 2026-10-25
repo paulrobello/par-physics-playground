@@ -352,6 +352,10 @@ input[type="range"]:hover::-moz-range-thumb {
 	padding-top: 8px;
 	background: var(--panel-bg);
 	border-right: 1px solid var(--panel-border);
+	/* Zero the grid-row minimum so the 1fr track tracks the VIEWPORT, not
+	 * the rail's button stack; the rail scrolls if the window is very short. */
+	min-height: 0;
+	overflow-y: auto;
 }
 
 .tool-btn {
