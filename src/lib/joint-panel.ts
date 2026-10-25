@@ -222,6 +222,12 @@ export function attachJointPanel(deps: JointPanelDeps): () => void {
 					if (Number.isFinite(value) && value > 0)
 						applyParams(id, { kind: "rope", length: value });
 				});
+		} else if (params.kind === "gear" || params.kind === "belt") {
+			paramsEl.innerHTML = `
+				<p class="joint-field">Radius ratio (A/B): ${params.ratio.toFixed(3)}</p>
+				<p class="joint-field">Drive: ${params.kind === "gear" ? "Opposite spins (mesh)" : "Same-direction (belt)"}</p>
+				<p class="joint-field">Delete and re-place to change the ratio.</p>
+			`;
 		} else if (params.kind === "pulley") {
 			// Pulley readouts (post-MVP): rope length and wheel coordinates are
 			// READ-ONLY — the approved design locks the length at placement and

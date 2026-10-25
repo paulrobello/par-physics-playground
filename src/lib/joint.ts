@@ -24,7 +24,12 @@ import type RAPIER from "@dimforge/rapier2d-compat";
 import type { Vec2 } from "./triangulate";
 import type { DocumentId } from "./world";
 
-/** Implemented and planned joint types (PRD D7). Rope is a chain, not a joint. */
+/**
+ * Implemented and planned joint types (PRD D7). Rope is a chain, not a
+ * joint. Gear and belt are the post-MVP custom-constraint kinds
+ * (src/lib/gears.ts): both couple two CIRCLE bodies at the circles' radius
+ * ratio — a gear meshes (opposite spins), a belt drives the same direction.
+ */
 export type JointType =
 	| "pin"
 	| "motor"
@@ -33,7 +38,9 @@ export type JointType =
 	| "spring"
 	| "weld"
 	| "rope"
-	| "pulley";
+	| "pulley"
+	| "gear"
+	| "belt";
 
 /**
  * Per-type parameters, discriminated on `kind` (matches the entity's
@@ -139,6 +146,23 @@ export type JointParams =
 			 * so a path shorter than this hangs slack.
 			 */
 			readonly length: number;
+	  }
+	| {
+			readonly kind: "gear" | "belt";
+			/**
+			 * rA/rB — the two circles' radius ratio, captured at placement.
+			 * NOT panel-editable (the approved design: delete + re-place to
+			 * change it); the panel shows it read-only.
+			 */
+			readonly ratio: number;
+			/**
+			 * Each circle's rotation (radians) at placement — the phase anchor
+			 * the per-tick solve holds (drawn teeth stay meshed). The live
+			 * deviation is accumulated from Rapier's wrapped `rotation()` reads
+			 * in the world walk (see src/lib/gears.ts).
+			 */
+			readonly phaseA: number;
+			readonly phaseB: number;
 	  };
 
 /**
@@ -210,7 +234,9 @@ export type PlaceableJointKind =
 	| "motor"
 	| "spring"
 	| "rope"
-	| "pulley";
+	| "pulley"
+	| "gear"
+	| "belt";
 
 /** DOM-validation guard for the tool rail's joint-kind buttons. */
 export function isPlaceableJointKind(
@@ -224,7 +250,9 @@ export function isPlaceableJointKind(
 		value === "motor" ||
 		value === "spring" ||
 		value === "rope" ||
-		value === "pulley"
+		value === "pulley" ||
+		value === "gear" ||
+		value === "belt"
 	);
 }
 
@@ -388,6 +416,8 @@ export const JOINT_TYPE_LABELS: Record<JointType, string> = {
 	weld: "Weld",
 	rope: "Rope",
 	pulley: "Pulley",
+	gear: "Gear",
+	belt: "Belt",
 };
 
 /**
@@ -397,9 +427,12 @@ export const JOINT_TYPE_LABELS: Record<JointType, string> = {
  * pivots — the T1 semantics; the motor is a powered pin), a rod uses `p1` and
  * `p2` as its two ENDPOINTS and takes its length from their distance. Returns
  * undefined for kinds without this placement path (rope — P4-T4: the
- * freehand stroke; pulley without the `wheel` third click). The ONE
- * placement computation shared by the joint tool (interaction.ts) and the
- * debug API, so both paths produce identical entities.
+ * freehand stroke; pulley without the `wheel` third click; gear/belt
+ * without a second CIRCLE — the `radii` record is the caller's proof that
+ * both clicks landed on circles, so a missing or non-positive-radius
+ * record is the refused placement). The ONE placement computation shared
+ * by the joint tool (interaction.ts) and the debug API, so both paths
+ * produce identical entities.
  */
 export function makePlacedJoint(
 	id: DocumentId,
@@ -411,6 +444,7 @@ export function makePlacedJoint(
 	transformA: { x: number; y: number; rot: number },
 	transformB: { x: number; y: number; rot: number } | null,
 	wheel?: Vec2,
+	radii?: { radiusA: number; radiusB: number },
 ): JointEntity | undefined {
 	let params: JointParams;
 	let pivot: Vec2;
@@ -494,6 +528,39 @@ export function makePlacedJoint(
 			};
 			pivot = p1;
 			endpointB = p2;
+			break;
+		}
+		case "gear":
+		case "belt": {
+			// Two circles only: the anchors are the CENTERS (the coupling acts
+			// at the rims, so the click points carry no geometry), the ratio is
+			// the circles' radius ratio captured at placement, and the phases
+			// anchor the solve to the placed orientations. The caller carries
+			// `radii` only when both clicks landed on circles — a missing or
+			// non-positive record is the refused non-circle path.
+			const rA = radii?.radiusA;
+			const rB = radii?.radiusB;
+			if (
+				!bodyB ||
+				bodyA === bodyB ||
+				!transformB ||
+				rA === undefined ||
+				rB === undefined ||
+				!Number.isFinite(rA) ||
+				!Number.isFinite(rB) ||
+				rA <= 0 ||
+				rB <= 0
+			) {
+				return undefined;
+			}
+			params = {
+				kind,
+				ratio: rA / rB,
+				phaseA: transformA.rot,
+				phaseB: transformB.rot,
+			};
+			pivot = { x: transformA.x, y: transformA.y };
+			endpointB = { x: transformB.x, y: transformB.y };
 			break;
 		}
 		default:

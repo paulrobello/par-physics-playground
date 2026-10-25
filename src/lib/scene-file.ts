@@ -219,6 +219,20 @@ function checkEntity(raw: unknown, index: number): string | null {
 					return `joint ${String(e.id)} params.${key}: not finite`;
 				}
 			}
+			if (params.kind === "gear" || params.kind === "belt") {
+				// Radius ratio in (0, maxHalfExtent]: both circles' radii are
+				// shape-bounded, so their ratio is too; the phase anchors are
+				// angles, covered by the finite check above.
+				const ratio = params.ratio;
+				if (
+					typeof ratio !== "number" ||
+					!Number.isFinite(ratio) ||
+					ratio <= 0 ||
+					ratio > SCENE_BOUNDS.maxHalfExtent
+				) {
+					return `joint ${String(e.id)} params.ratio ${String(ratio)} outside (0, ${SCENE_BOUNDS.maxHalfExtent}]`;
+				}
+			}
 			if (params.kind === "pulley") {
 				// The wheel is a world point like a body center and the rope
 				// length must be a usable positive length: bounded validation

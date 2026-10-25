@@ -68,6 +68,16 @@ export interface SceneView {
 			 */
 			wx3: number,
 			wy3: number,
+			/**
+			 * Gear/belt circle geometry for the decorative rim-teeth overlay:
+			 * each circle's radius and live rotation, 0 when the joint is not
+			 * a gear/belt (all four are primitives — the per-frame walk stays
+			 * allocation-free).
+			 */
+			radiusA: number,
+			rotA: number,
+			radiusB: number,
+			rotB: number,
 		) => void,
 	): void;
 	/**
@@ -569,65 +579,153 @@ export function createRenderer(
 		// the blur raster is per-draw, and rope-heavy scenes draw hundreds of
 		// links. Shadow state toggles per item (selected only).
 		ctx.strokeStyle = ACCENT_COLOR;
-		scene.forEachJoint((id, jointType, wx, wy, motorOn, wx2, wy2, wx3, wy3) => {
-			const isSel = selected.has(id);
-			ctx.shadowColor = isSel ? HOVER_GLOW : "transparent";
-			ctx.shadowBlur = isSel ? HOVER_GLOW_BLUR_PX : 0;
-			if (jointType === "pulley") {
-				// Fixed pulley (post-MVP): the two rope lines through the wheel
-				// ARE the glyph's body, with a wheel circle at the scene point —
-				// no anchor ring (the rope-link convention). Selection glow from
-				// the shadow state above; screen-constant widths via 1/zoom.
+		scene.forEachJoint(
+			(
+				id,
+				jointType,
+				wx,
+				wy,
+				motorOn,
+				wx2,
+				wy2,
+				wx3,
+				wy3,
+				radiusA,
+				rotA,
+				radiusB,
+				rotB,
+			) => {
+				const isSel = selected.has(id);
+				ctx.shadowColor = isSel ? HOVER_GLOW : "transparent";
+				ctx.shadowBlur = isSel ? HOVER_GLOW_BLUR_PX : 0;
+				if (jointType === "gear" || jointType === "belt") {
+					// Gear/belt (post-MVP): the axle line between the circle
+					// centers (the belt draws the band as two parallel lines),
+					// plus decorative rim teeth per circle that rotate with the
+					// body — the glyph IS the coupling readout. Teeth stay in
+					// world units keyed to each circle's radius; stroke widths
+					// are screen-constant (1/zoom), glow selection-only.
+					ctx.save();
+					ctx.lineWidth = (isSel ? 2 : 1.2) / zoom;
+					ctx.beginPath();
+					ctx.moveTo(wx, wy);
+					ctx.lineTo(wx2, wy2);
+					ctx.stroke();
+					if (jointType === "belt") {
+						const dx = wx2 - wx;
+						const dy = wy2 - wy;
+						const len = Math.hypot(dx, dy);
+						if (len > 1e-6) {
+							const px = (-dy / len) * Math.min(radiusA, radiusB);
+							const py = (dx / len) * Math.min(radiusA, radiusB);
+							ctx.beginPath();
+							ctx.moveTo(wx + px, wy + py);
+							ctx.lineTo(wx2 + px, wy2 + py);
+							ctx.moveTo(wx - px, wy - py);
+							ctx.lineTo(wx2 - px, wy2 - py);
+							ctx.stroke();
+						}
+					}
+					// Teeth reach ~1.5 CSS px past the rim: the tip edge is
+					// screen-constant so the ring reads at every zoom.
+					const tip = 1.5 / zoom;
+					if (radiusA > 0) {
+						const teeth = Math.min(
+							28,
+							Math.max(8, Math.round((Math.PI * 2 * radiusA) / 6)),
+						);
+						ctx.beginPath();
+						for (let i = 0; i < teeth; i++) {
+							const a = rotA + (i * Math.PI * 2) / teeth;
+							ctx.moveTo(
+								wx + Math.cos(a) * radiusA * 0.82,
+								wy + Math.sin(a) * radiusA * 0.82,
+							);
+							ctx.lineTo(
+								wx + Math.cos(a) * (radiusA + tip),
+								wy + Math.sin(a) * (radiusA + tip),
+							);
+						}
+						ctx.stroke();
+					}
+					if (radiusB > 0) {
+						const teeth = Math.min(
+							28,
+							Math.max(8, Math.round((Math.PI * 2 * radiusB) / 6)),
+						);
+						ctx.beginPath();
+						for (let i = 0; i < teeth; i++) {
+							const a = rotB + (i * Math.PI * 2) / teeth;
+							ctx.moveTo(
+								wx2 + Math.cos(a) * radiusB * 0.82,
+								wy2 + Math.sin(a) * radiusB * 0.82,
+							);
+							ctx.lineTo(
+								wx2 + Math.cos(a) * (radiusB + tip),
+								wy2 + Math.sin(a) * (radiusB + tip),
+							);
+						}
+						ctx.stroke();
+					}
+					ctx.restore();
+					return;
+				}
+				if (jointType === "pulley") {
+					// Fixed pulley (post-MVP): the two rope lines through the wheel
+					// ARE the glyph's body, with a wheel circle at the scene point —
+					// no anchor ring (the rope-link convention). Selection glow from
+					// the shadow state above; screen-constant widths via 1/zoom.
+					ctx.save();
+					ctx.lineWidth = (isSel ? 2 : 1.2) / zoom;
+					ctx.beginPath();
+					ctx.moveTo(wx, wy);
+					ctx.lineTo(wx3, wy3);
+					ctx.lineTo(wx2, wy2);
+					ctx.stroke();
+					ctx.beginPath();
+					ctx.arc(wx3, wy3, r, 0, Math.PI * 2);
+					ctx.stroke();
+					ctx.restore();
+					return;
+				}
+				if (jointType === "rope") {
+					// Rope link (P4-T4): no ring, no inner glyph — the chain of
+					// stroked link lines IS the rope's continuous curve through the
+					// segment centers.
+					ctx.save();
+					ctx.lineWidth = (isSel ? 2 : 1.2) / zoom;
+					ctx.beginPath();
+					ctx.moveTo(wx, wy);
+					ctx.lineTo(wx2, wy2);
+					ctx.stroke();
+					ctx.restore();
+					return;
+				}
+				// A stopped motor draws dimmed (the at-a-glance on/off state the
+				// toggle affordance flips); everything else keeps the accent.
+				const dim = jointType === "motor" && !motorOn;
 				ctx.save();
-				ctx.lineWidth = (isSel ? 2 : 1.2) / zoom;
+				ctx.lineWidth = (isSel ? 2 : 1.5) / zoom;
+				ctx.strokeStyle = dim ? JOINT_OFF_COLOR : ACCENT_COLOR;
 				ctx.beginPath();
-				ctx.moveTo(wx, wy);
-				ctx.lineTo(wx3, wy3);
-				ctx.lineTo(wx2, wy2);
+				ctx.arc(wx, wy, r, 0, Math.PI * 2);
 				ctx.stroke();
-				ctx.beginPath();
-				ctx.arc(wx3, wy3, r, 0, Math.PI * 2);
-				ctx.stroke();
+				ctx.fillStyle = dim ? JOINT_OFF_COLOR : ACCENT_COLOR;
+				const type = jointType as JointType;
+				traceJointGlyph(ctx, type, wx, wy, r);
+				if (LINE_GLYPH_TYPES.has(type)) {
+					// Open path (a line, not a region): fill is zero-area; stroke it.
+					ctx.stroke();
+				} else {
+					ctx.fill();
+				}
+				if (type === "spring") {
+					// Coil between the anchors (P4-T4): the visible spring body.
+					traceSpringCoil(ctx, wx, wy, wx2, wy2, zoom);
+				}
 				ctx.restore();
-				return;
-			}
-			if (jointType === "rope") {
-				// Rope link (P4-T4): no ring, no inner glyph — the chain of
-				// stroked link lines IS the rope's continuous curve through the
-				// segment centers.
-				ctx.save();
-				ctx.lineWidth = (isSel ? 2 : 1.2) / zoom;
-				ctx.beginPath();
-				ctx.moveTo(wx, wy);
-				ctx.lineTo(wx2, wy2);
-				ctx.stroke();
-				ctx.restore();
-				return;
-			}
-			// A stopped motor draws dimmed (the at-a-glance on/off state the
-			// toggle affordance flips); everything else keeps the accent.
-			const dim = jointType === "motor" && !motorOn;
-			ctx.save();
-			ctx.lineWidth = (isSel ? 2 : 1.5) / zoom;
-			ctx.strokeStyle = dim ? JOINT_OFF_COLOR : ACCENT_COLOR;
-			ctx.beginPath();
-			ctx.arc(wx, wy, r, 0, Math.PI * 2);
-			ctx.stroke();
-			ctx.fillStyle = dim ? JOINT_OFF_COLOR : ACCENT_COLOR;
-			const type = jointType as JointType;
-			traceJointGlyph(ctx, type, wx, wy, r);
-			if (LINE_GLYPH_TYPES.has(type)) {
-				// Open path (a line, not a region): fill is zero-area; stroke it.
-				ctx.stroke();
-			} else {
-				ctx.fill();
-			}
-			if (type === "spring") {
-				// Coil between the anchors (P4-T4): the visible spring body.
-				traceSpringCoil(ctx, wx, wy, wx2, wy2, zoom);
-			}
-			ctx.restore();
-		});
+			},
+		);
 		ctx.shadowColor = "transparent";
 		ctx.shadowBlur = 0;
 	}

@@ -685,6 +685,8 @@ export function createToolEvents(
 			// T2: the tool's joint kind drives the params; makePlacedJoint is the
 			// ONE placement computation (shared with the debug API). The pulley's
 			// third-click wheel point rides the spec (absent for other kinds).
+			const shapeA = world.shapeOf(spec.bodyAId);
+			const shapeB = spec.bodyBId ? world.shapeOf(spec.bodyBId) : undefined;
 			const entity = makePlacedJoint(
 				freshJointId(),
 				spec.jointKind,
@@ -706,6 +708,9 @@ export function createToolEvents(
 					: null,
 				spec.wheelX !== undefined
 					? { x: spec.wheelX, y: spec.wheelY ?? 0 }
+					: undefined,
+				shapeA?.kind === "circle" && shapeB?.kind === "circle"
+					? { radiusA: shapeA.radius, radiusB: shapeB.radius }
 					: undefined,
 			);
 			if (!entity || !world.spawnJoint(entity)) {

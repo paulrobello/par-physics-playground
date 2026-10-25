@@ -13,6 +13,7 @@ import {
 	FreehandStrokeBuilder,
 } from "./freehand";
 import { jointPickRadius, type PlaceableJointKind } from "./joint";
+import { showNotice } from "./notice";
 import { THRUSTER_AIM_MIN_DRAG } from "./thruster";
 import { pointInPolygon, type Vec2 } from "./triangulate";
 
@@ -734,6 +735,12 @@ export interface ToolSessionEvents {
 	/** Live center of a body id, or undefined when culled (snap preview). */
 	bodyCenter?(id: string): Vec2 | undefined;
 	/**
+	 * The picked entity's body shape, or undefined when the id is not a
+	 * body (gear/belt placement requires circles — the second-click refusal
+	 * needs the shape kind, which the tool session cannot resolve itself).
+	 */
+	bodyShape?(id: string): BodyShape | undefined;
+	/**
 	 * A snap gesture completed: teleport `moverId` so its center lands on
 	 * `targetId`'s center (the events layer applies world.moveBody and
 	 * commits the undo action the arming press opened).
@@ -1341,7 +1348,36 @@ export class ToolSession {
 			// lands on the first click's point (center clicks = the doc
 			// example), then the joint applies at that shared point — move +
 			// joint as one undo action (Paul, 2026-10-25).
-			const snapTarget = this.pick(wx, wy);
+			const angularDrive =
+				this.jointKind === "gear" || this.jointKind === "belt";
+			const snapTarget = angularDrive
+				? this.events.pickBodyOnly?.(wx, wy)
+				: this.pick(wx, wy);
+			if (angularDrive) {
+				if (
+					!snapTarget ||
+					snapTarget === bodyAId ||
+					this.events.bodyShape?.(snapTarget)?.kind !== "circle"
+				) {
+					showNotice(
+						"Gear and belt joints connect two distinct circles",
+						"error",
+					);
+					this.events.onCancelAction?.();
+					return;
+				}
+				const jointId = this.events.onPlaceJoint?.({
+					bodyAId,
+					bodyBId: snapTarget,
+					jointKind: this.jointKind,
+					anchorX,
+					anchorY,
+					x: wx,
+					y: wy,
+				});
+				if (jointId) this.selectedIds = new Set([jointId]);
+				return;
+			}
 			if (this.snapJoin && snapTarget) {
 				if (snapTarget === bodyAId) {
 					this.events.onCancelAction?.();
@@ -1481,7 +1517,12 @@ export class ToolSession {
 			// Shift+click ties the WHOLE stack under the click immediately —
 			// consecutive pairs get the joint at the click point (Paul,
 			// 2026-10-25). One or zero bodies falls through to the normal arm.
-			if (mods.shift === true && this.jointKind !== "pulley") {
+			if (
+				mods.shift === true &&
+				this.jointKind !== "pulley" &&
+				this.jointKind !== "gear" &&
+				this.jointKind !== "belt"
+			) {
 				const stack = this.events.pickAllBodies?.(wx, wy) ?? [];
 				if (stack.length >= 2) {
 					this.events.onPlaceJointChain?.({
@@ -1493,7 +1534,19 @@ export class ToolSession {
 					return;
 				}
 			}
-			const hitId = this.pick(wx, wy);
+			const angularDrive =
+				this.jointKind === "gear" || this.jointKind === "belt";
+			const hitId = angularDrive
+				? this.events.pickBodyOnly?.(wx, wy)
+				: this.pick(wx, wy);
+			if (
+				angularDrive &&
+				(!hitId || this.events.bodyShape?.(hitId)?.kind !== "circle")
+			) {
+				showNotice("Gear and belt joints connect two circles", "error");
+				this.events.onCancelAction?.();
+				return;
+			}
 			if (!hitId) {
 				// No body under the first click: no gesture started, so drop the
 				// generic beginAction snapshot this tool's press already took.

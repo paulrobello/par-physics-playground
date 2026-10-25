@@ -24,6 +24,7 @@ import {
 	type Material,
 	SceneDocument,
 } from "./document";
+import { solveGearImpulse, wrapAngleDelta } from "./gears";
 import {
 	type JointEntity,
 	type JointParams,
@@ -140,6 +141,15 @@ export class PhysicsWorld {
 	private readonly brittleColliders = new Map<number, DocumentId>();
 	/** Elapsed thrusting burn time per thruster id (duration accounting). */
 	private readonly thrusterBurn = new Map<DocumentId, number>();
+	private readonly gearPhases = new Map<
+		DocumentId,
+		{
+			lastA: number;
+			lastB: number;
+			deltaA: number;
+			deltaB: number;
+		}
+	>();
 	/**
 	 * Mints shatter-fragment ids. main.ts wires freshBodyId so fragments share
 	 * the body-id space and the scene-file id-counter sync covers restored
@@ -464,6 +474,29 @@ export class PhysicsWorld {
 			);
 			return false;
 		}
+		if (entity.params.kind === "gear" || entity.params.kind === "belt") {
+			const a = this.shapeOf(entity.bodyA);
+			const b = entity.bodyB ? this.shapeOf(entity.bodyB) : undefined;
+			if (
+				entity.bodyA === entity.bodyB ||
+				!bodyB ||
+				a?.kind !== "circle" ||
+				b?.kind !== "circle" ||
+				a.radius <= 0 ||
+				b.radius <= 0
+			)
+				return false;
+			this.gearPhases.set(entity.id, {
+				lastA: bodyA.rotation(),
+				lastB: bodyB.rotation(),
+				deltaA: 0,
+				deltaB: 0,
+			});
+			bodyA.wakeUp();
+			bodyB.wakeUp();
+			this.doc.add(entity);
+			return true;
+		}
 		if (entity.params.kind === "pulley") {
 			// Fixed pulley (post-MVP): a DOC-ONLY constraint behind the PRD R6
 			// custom-constraint seam — no Rapier impulse joint exists for a rope
@@ -655,6 +688,7 @@ export class PhysicsWorld {
 	 * Fires the removal notification for the joint id so selection/UI drop it.
 	 */
 	removeJoint(id: DocumentId): void {
+		this.gearPhases.delete(id);
 		const joint = this.joints.get(id);
 		if (joint) {
 			this.world.removeImpulseJoint(joint, true);
@@ -1260,10 +1294,41 @@ export class PhysicsWorld {
 		this.doc.eachJoint(this.applyPulleyTick);
 	}
 
+	/** Phase history is allocated at spawn, never in this fixed-tick walk. */
+	private readonly applyGearTick = (e: JointEntity): void => {
+		if (e.params.kind !== "gear" && e.params.kind !== "belt") return;
+		const a = this.bodies.get(e.bodyA);
+		const b = e.bodyB ? this.bodies.get(e.bodyB) : undefined;
+		const state = this.gearPhases.get(e.id);
+		const shapeB = e.bodyB ? this.shapeOf(e.bodyB) : undefined;
+		if (!a || !b || !state || shapeB?.kind !== "circle") return;
+		const ra = shapeB.radius * e.params.ratio;
+		const rb = shapeB.radius;
+		if (!(ra > 0 && rb > 0)) return;
+		const angleA = a.rotation(),
+			angleB = b.rotation();
+		state.deltaA += wrapAngleDelta(angleA - state.lastA);
+		state.deltaB += wrapAngleDelta(angleB - state.lastB);
+		state.lastA = angleA;
+		state.lastB = angleB;
+		const sign = e.params.kind === "gear" ? 1 : -1;
+		const j = solveGearImpulse(
+			ra * state.deltaA + sign * rb * state.deltaB,
+			ra * a.angvel() + sign * rb * b.angvel(),
+			ra * ra * a.effectiveWorldInvInertia() +
+				rb * rb * b.effectiveWorldInvInertia(),
+			SIM_DT_SECONDS,
+		);
+		if (j === 0) return;
+		a.applyTorqueImpulse(j * ra, true);
+		b.applyTorqueImpulse(sign * j * rb, true);
+	};
+
 	/** One fixed tick: advance physics, then cull bodies below the kill threshold. */
 	step(): void {
 		this.applyThrusters();
 		this.applyPulleyTension();
+		this.doc.eachJoint(this.applyGearTick);
 		this.world.step(this.contactEvents);
 		if (this.brittleColliders.size > 0) this.processBrittleImpacts();
 		for (const [id, body] of this.bodies) {

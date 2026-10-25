@@ -39,9 +39,9 @@ Entirely out of scope:
 - Mobile/touch as a first-class target (desktop first; touch is a later adaptation).
 
 Deferred post-MVP (wanted, not in the first release — tracked as Open Questions;
-pulleys, brittle, and assemblies have since SHIPPED — see Open Questions):
+pulleys, gears/belts, brittle, and assemblies have since SHIPPED — see Open
+Questions):
 
-- Gears (no native Rapier2D joint; needs custom constraint work).
 - Material extras: brittle/breakable, flammable, melting.
 - Saving a group of parts as a re-usable assembly.
 - An autonomous character (stretch goal).
@@ -56,7 +56,7 @@ pulleys, brittle, and assemblies have since SHIPPED — see Open Questions):
 | D4 | Motors and thrusters first among actuators; then everything (springs, ropes, etc.). |
 | D5 | Full sim controls: gravity toggle/direction, time-scale slider, single-step. |
 | D6 | Materials: predefined palette plus user-defined customs (name, density, friction, restitution, color). Algodoo-style extras (brittle, flammable, melting) post-MVP. |
-| D7 | Joint set: pin/revolute, motor (powered revolute with speed/torque), slider/prismatic, spring, rigid rod, weld, rope, pin-to-world. Pulleys SHIPPED 2026-10-24 (force-based fixed pulley — post-MVP extra, see Open Questions). Gears post-MVP. |
+| D7 | Joint set: pin/revolute, motor (powered revolute with speed/torque), slider/prismatic, spring, rigid rod, weld, rope, pin-to-world. Pulleys SHIPPED 2026-10-24 (force-based fixed pulley — post-MVP extra, see Open Questions). Gears/belts SHIPPED 2026-10-25 (velocity-level angular coupling — post-MVP extra, see Open Questions). |
 | D8 | Scenes: browser-local named saves plus JSON import/export. Storage engine is IndexedDB (1000-object scenes exceed localStorage limits). |
 | D9 | Scale target 500–1000 objects; rope segments count heavily toward it. |
 | D10 | Select/move/rotate, duplicate, delete, undo/redo are core. Group-as-reusable-assembly is post-MVP. |
@@ -130,11 +130,18 @@ IndexedDB named scenes with rename/delete and autosave-restore of the last scene
 
 Deferred post-MVP (owner wants, later releases):
 
-1. Gears — custom constraint vs emulation approach. (Pulleys shipped post-MVP:
-   a fixed wheel point in the joint params, a doc-only one-sided rope solve
-   driven per tick from `PhysicsWorld.step()` behind the R6 seam — three-click
-   placement, wheel glyph picking, read-only panel readouts; serialization,
-   undo, and assemblies treat it as an ordinary joint.)
+1. Gears — custom constraint vs emulation approach. SHIPPED post-MVP
+   2026-10-25: a doc-only two-sided angular solve driven per tick from
+   `PhysicsWorld.step()` behind the R6 seam (gears mesh opposite, belts drive
+   same-direction, at the circles' captured radius ratio; phase-anchored
+   Baumgarte correction keeps drawn teeth meshed) — circle-only two-click
+   placement with visible refusal, tooth-ring + belt-band rendering,
+   read-only panel readouts; serialization, undo, and assemblies treat them
+   as ordinary joints. (Pulleys shipped post-MVP 2026-10-24: a fixed wheel
+   point in the joint params, a doc-only one-sided rope solve driven per tick
+   from `PhysicsWorld.step()` — three-click placement, wheel glyph picking,
+   read-only panel readouts; serialization, undo, and assemblies treat it as
+   an ordinary joint.)
 2. Material extras — brittle/breakable, flammable, melting. (Brittle shipped
    post-MVP.)
 3. Assembly format — saving a group of parts as a reusable stamped component.

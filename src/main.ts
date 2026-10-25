@@ -151,6 +151,10 @@ function listPickableJoints(): { id: string; wx: number; wy: number }[] {
 	for (const e of w.jointEntities()) {
 		const anchor = w.jointWorldAnchor(e);
 		if (anchor) out.push({ id: e.id, wx: anchor.x, wy: anchor.y });
+		if (e.params.kind === "gear" || e.params.kind === "belt") {
+			const anchors = w.jointWorldAnchors(e);
+			if (anchors) out.push({ id: e.id, wx: anchors.b.x, wy: anchors.b.y });
+		}
 		if (e.params.kind === "pulley")
 			out.push({ id: e.id, wx: e.params.wheelX, wy: e.params.wheelY });
 	}
@@ -212,24 +216,46 @@ const sceneView = {
 			wy2: number,
 			wx3: number,
 			wy3: number,
+			/** Gear/belt circle geometry for the rim-teeth overlay (0 = unused). */
+			radiusA: number,
+			rotA: number,
+			radiusB: number,
+			rotB: number,
 		) => void,
 	): void {
 		const w = world;
 		if (!w) return;
 		w.eachJointEntity((e) => {
 			const anchors = w.jointWorldAnchors(e);
-			if (anchors)
-				fn(
-					e.id,
-					e.jointType,
-					anchors.a.x,
-					anchors.a.y,
-					e.params.kind === "motor" ? e.params.on : true,
-					anchors.b.x,
-					anchors.b.y,
-					e.params.kind === "pulley" ? e.params.wheelX : anchors.b.x,
-					e.params.kind === "pulley" ? e.params.wheelY : anchors.b.y,
-				);
+			if (!anchors) return;
+			const gearDrive = e.params.kind === "gear" || e.params.kind === "belt";
+			let radiusA = 0;
+			let rotA = 0;
+			let radiusB = 0;
+			let rotB = 0;
+			if (gearDrive) {
+				const shapeA = w.shapeOf(e.bodyA);
+				const shapeB = e.bodyB ? w.shapeOf(e.bodyB) : undefined;
+				if (shapeA?.kind === "circle") radiusA = shapeA.radius;
+				if (shapeB?.kind === "circle") radiusB = shapeB.radius;
+				rotA = w.bodies.get(e.bodyA)?.rotation() ?? 0;
+				rotB = e.bodyB ? (w.bodies.get(e.bodyB)?.rotation() ?? 0) : 0;
+			}
+			fn(
+				e.id,
+				e.jointType,
+				anchors.a.x,
+				anchors.a.y,
+				e.params.kind === "motor" ? e.params.on : true,
+				anchors.b.x,
+				anchors.b.y,
+				e.params.kind === "pulley" ? e.params.wheelX : anchors.b.x,
+				e.params.kind === "pulley" ? e.params.wheelY : anchors.b.y,
+				radiusA,
+				rotA,
+				radiusB,
+				rotB,
+			);
 		});
 	},
 	/**
@@ -510,6 +536,7 @@ void (async () => {
 		pickBodyAtDepth(listPickableBodies(), wx, wy, depth);
 	events.pickAllBodies = (wx, wy) =>
 		pickAllBodies(listPickableBodies(), wx, wy);
+	events.bodyShape = (id) => w.shapeOf(id);
 	events.bodyCenter = (id) => {
 		const b = w.bodies.get(id);
 		return b ? { x: b.translation().x, y: b.translation().y } : undefined;
