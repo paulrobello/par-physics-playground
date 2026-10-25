@@ -90,6 +90,12 @@ export interface SceneView {
 	): void;
 	/** In-progress drawing preview geometry, or null. */
 	preview(): DrawPreview | null;
+	/**
+	 * Sim-clock seconds — the animation phase source for effects that must
+	 * freeze when time is paused (the thruster flame flicker). Wall-clock
+	 * time would keep them alive through a pause.
+	 */
+	simTime(): number;
 	hoverId(): string | undefined;
 	selectedIds(): ReadonlySet<string>;
 	/** In-progress rubber-band selection rectangle, or null. */
@@ -675,7 +681,10 @@ export function createRenderer(
 		const selected = scene.selectedIds();
 		const r = jointGlyphRadius(zoom);
 		ctx.lineWidth = 1.5 / zoom;
-		const now = performance.now();
+		// Flicker phase from the SIM clock: pausing time freezes the flame
+		// (wall-clock flicker kept the exhaust alive through a pause — Paul,
+		// 2026-10-25).
+		const t = scene.simTime();
 		scene.forEachThruster((id, wx, wy, angle, on) => {
 			const isSel = selected.has(id);
 			// Same PRD R2 rule as joints: glow on selection only.
@@ -694,7 +703,6 @@ export function createRenderer(
 				for (let i = 0; i < id.length; i++) {
 					hash = (hash * 31 + id.charCodeAt(i)) | 0;
 				}
-				const t = now / 1000;
 				const flicker =
 					1 +
 					0.13 * Math.sin(t * 21 + hash) +

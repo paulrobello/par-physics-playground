@@ -9,7 +9,7 @@ import { attachAssemblyPanel } from "./lib/assembly-panel";
 import { createAssemblyStore } from "./lib/assembly-store";
 import { Camera, cameraFitForBounds } from "./lib/camera";
 import { attachCameraControls } from "./lib/camera-controls";
-import { SIM_SPEED_FACTOR, SimClock } from "./lib/clock";
+import { SIM_DT_SECONDS, SIM_SPEED_FACTOR, SimClock } from "./lib/clock";
 import { installDebugApi } from "./lib/debug-api";
 import { buildDemoScene, demoSceneBounds } from "./lib/demo-scene";
 import type { LabelFont, LabelTextAlign } from "./lib/document";
@@ -301,6 +301,12 @@ const sceneView = {
 	},
 	preview() {
 		return session?.preview() ?? null;
+	},
+	// Animation phase for pause-freezing effects: the sim clock's tick count
+	// (0 before the clock exists — debug pages boot paused with a still
+	// flame).
+	simTime() {
+		return clock ? clock.tick * SIM_DT_SECONDS : 0;
 	},
 	rubberBand() {
 		return session?.rubberBand() ?? null;
