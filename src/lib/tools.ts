@@ -25,13 +25,15 @@ export type ToolId =
 	| "freehand"
 	| "text"
 	| "thruster"
-	| "joint";
+	| "joint"
+	| "snap";
 
 /** All tool ids, for DOM validation of toolbar buttons. */
 export const TOOL_IDS: readonly ToolId[] = [
 	"select",
 	"box",
 	"joint",
+	"snap",
 	"circle",
 	"polygon",
 	"line",
@@ -46,7 +48,7 @@ export function isToolId(value: string): value is ToolId {
 
 /**
  * Keyboard shortcuts: V select, B box, C circle, G polygon, L line, F
- * freehand, T text, H thruster, J joint.
+ * freehand, T text, H thruster, J joint, N snap.
  */
 export const TOOL_KEYS: Record<string, ToolId> = {
 	KeyV: "select",
@@ -58,6 +60,7 @@ export const TOOL_KEYS: Record<string, ToolId> = {
 	KeyT: "text",
 	KeyH: "thruster",
 	KeyJ: "joint",
+	KeyN: "snap",
 };
 
 /**
@@ -339,6 +342,11 @@ export type DrawPreview =
 			 */
 			wheel?: Vec2;
 	  }
+	/**
+	 * Snap tool arming: the mover's center to the cursor; `toBody` marks a
+	 * valid snap target under the cursor (dashed ring when empty space).
+	 */
+	| { kind: "snap"; from: Vec2; to: Vec2; toBody: boolean }
 	/** Thruster drag-to-aim: the mount arrow pivots toward the cursor. */
 	| { kind: "thruster-aim"; x: number; y: number; angle: number };
 
@@ -410,6 +418,29 @@ export function pickBody(
 		}
 	}
 	return undefined;
+}
+
+/**
+ * The `depth`-th body containing the point, TOPMOST FIRST: 0 is the
+ * topmost (pickBody's answer), 1 is the body one beneath it — the Alt+click
+ * pick for reaching a body hidden behind another (Paul, 2026-10-25). Depth
+ * past the last hit clamps to the deepest.
+ */
+export function pickBodyAtDepth(
+	bodies: readonly PickableBody[],
+	wx: number,
+	wy: number,
+	depth: number,
+): string | undefined {
+	const hits: string[] = [];
+	for (let i = bodies.length - 1; i >= 0; i--) {
+		const b = bodies[i];
+		if (!b) continue;
+		if (pickBody([b], wx, wy) !== undefined) hits.push(b.id);
+	}
+	if (hits.length === 0) return undefined;
+	const d = Math.max(0, Math.min(Math.floor(depth), hits.length - 1));
+	return hits[d];
 }
 
 /**
@@ -556,6 +587,11 @@ export interface PointerMods {
 	readonly shift?: boolean;
 	/** R-held with the select tool: a press on the selection rotates it. */
 	readonly rotate?: boolean;
+	/**
+	 * Alt-held with the snap tool: a click picks the body ONE BENEATH the
+	 * topmost at that point (stacked bodies — Paul, 2026-10-25).
+	 */
+	readonly alt?: boolean;
 }
 
 /** Events the session emits; the interaction layer forwards them to the world. */
@@ -676,6 +712,23 @@ export interface ToolSessionEvents {
 		readonly segments: readonly string[];
 		readonly joints: readonly string[];
 	} | null;
+	/**
+	 * Snap tool's bodies-only depth pick (Alt-click reaches stacked bodies):
+	 * resolves against live bodies like {@link pickBodyAtDepth}. Omitted in
+	 * tests that don't exercise the snap tool.
+	 */
+	pickBodyOnly?(wx: number, wy: number, depth?: number): string | undefined;
+	/** Live center of a body id, or undefined when culled (snap preview). */
+	bodyCenter?(id: string): Vec2 | undefined;
+	/**
+	 * A snap gesture completed: teleport `moverId` so its center lands on
+	 * `targetId`'s center (the events layer applies world.moveBody and
+	 * commits the undo action the arming press opened).
+	 */
+	onSnapBodies?(spec: {
+		readonly moverId: string;
+		readonly targetId: string;
+	}): void;
 }
 
 type Phase =
@@ -767,6 +820,22 @@ type Phase =
 			readonly anchorY: number;
 			readonly anchorBX: number;
 			readonly anchorBY: number;
+			curX: number;
+			curY: number;
+	  }
+	| {
+			/**
+			 * Snap tool: the mover body is picked, the next body pick snaps it
+			 * onto that body's center. `cycleDepth` remembers how deep the
+			 * Alt+click cycle went for the mover pick so a repeat Alt+click at
+			 * the same spot re-picks one deeper instead of completing.
+			 */
+			readonly kind: "snap-arming";
+			readonly moverId: string;
+			/** Where the mover-pick click landed (preview fallback). */
+			readonly pickX: number;
+			readonly pickY: number;
+			readonly cycleDepth: number;
 			curX: number;
 			curY: number;
 	  }
@@ -949,6 +1018,24 @@ export class ToolSession {
 				to: { x: this.phase.anchorBX, y: this.phase.anchorBY },
 				toBody: true,
 				wheel: { x: this.phase.curX, y: this.phase.curY },
+			};
+		}
+		if (this.phase.kind === "snap-arming") {
+			// Mover center → cursor; the ring at the cursor marks a valid
+			// target (dashed when no body is under it).
+			const center = this.events.bodyCenter?.(this.phase.moverId) ?? {
+				x: this.phase.pickX,
+				y: this.phase.pickY,
+			};
+			const cursorHit = this.events.pickBodyOnly?.(
+				this.phase.curX,
+				this.phase.curY,
+			);
+			return {
+				kind: "snap",
+				from: center,
+				to: { x: this.phase.curX, y: this.phase.curY },
+				toBody: cursorHit !== undefined && cursorHit !== this.phase.moverId,
 			};
 		}
 		if (this.phase.kind === "thruster-aim") {
@@ -1234,6 +1321,42 @@ export class ToolSession {
 			if (jointId) this.selectedIds = new Set([jointId]);
 			return;
 		}
+		if (this.phase.kind === "snap-arming") {
+			const p = this.phase;
+			// Alt+click near the mover pick RE-PICKS the mover one deeper (the
+			// cycle continues); any other click is the snap target. The mover
+			// cycle reuses the arming snapshot — no new beginAction, since the
+			// gesture has not completed yet.
+			const nearPick =
+				Math.hypot(wx - p.pickX, wy - p.pickY) < 8 / this.lastZoom;
+			if (mods.alt === true && nearPick) {
+				const deeper = this.events.pickBodyOnly?.(wx, wy, p.cycleDepth + 1);
+				if (deeper && deeper !== p.moverId) {
+					this.phase = {
+						...p,
+						moverId: deeper,
+						cycleDepth: p.cycleDepth + 1,
+						curX: wx,
+						curY: wy,
+					};
+				}
+				return;
+			}
+			this.phase = { kind: "idle" };
+			const targetId = this.events.pickBodyOnly?.(
+				wx,
+				wy,
+				mods.alt === true ? 1 : 0,
+			);
+			if (!targetId || targetId === p.moverId) {
+				// Missing target or the mover itself: abort and drop the arming
+				// snapshot (the pulley-abort convention).
+				this.events.onCancelAction?.();
+				return;
+			}
+			this.events.onSnapBodies?.({ moverId: p.moverId, targetId });
+			return;
+		}
 		if (this.phase.kind === "polygon-place") {
 			const first = this.phase.points[0] as Vec2;
 			const snapped = this.snapPoint(wx, wy);
@@ -1278,6 +1401,29 @@ export class ToolSession {
 				bodyAId: hitId,
 				anchorX: wx,
 				anchorY: wy,
+				curX: wx,
+				curY: wy,
+			};
+			return;
+		}
+		if (this.tool === "snap") {
+			// Arm: the picked body is the mover; the next body click snaps it
+			// onto that body's center. Alt+click picks one beneath the topmost
+			// (stacked bodies); depth remembers for a repeat Alt+click cycle.
+			const depth = mods.alt === true ? 1 : 0;
+			const hitId = this.events.pickBodyOnly?.(wx, wy, depth);
+			if (!hitId) {
+				// No body: no gesture started — drop the generic beginAction
+				// snapshot this tool's press already took.
+				this.events.onCancelAction?.();
+				return;
+			}
+			this.phase = {
+				kind: "snap-arming",
+				moverId: hitId,
+				pickX: wx,
+				pickY: wy,
+				cycleDepth: depth,
 				curX: wx,
 				curY: wy,
 			};
@@ -1455,7 +1601,8 @@ export class ToolSession {
 		}
 		if (
 			this.phase.kind === "joint-arming" ||
-			this.phase.kind === "joint-wheel"
+			this.phase.kind === "joint-wheel" ||
+			this.phase.kind === "snap-arming"
 		) {
 			this.phase = { ...this.phase, curX: wx, curY: wy };
 			return;

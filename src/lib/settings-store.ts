@@ -31,6 +31,8 @@ export interface PersistedSettings {
 	paused: boolean;
 	/** X-ray view: bodies draw translucent so occluded shapes stay visible. */
 	xRay: boolean;
+	/** Joint-lines view: dotted anchor→body-center relationship lines. */
+	jointLines: boolean;
 	/** Active tool. */
 	tool: ToolId;
 }
@@ -60,6 +62,7 @@ export const DEFAULT_SETTINGS: PersistedSettings = {
 	fpsVisible: false,
 	paused: false,
 	xRay: false,
+	jointLines: false,
 	tool: "select",
 };
 
@@ -122,6 +125,7 @@ export function loadSettings(storage: SettingsStorage): PersistedSettings {
 		fpsVisible: bool(raw.fpsVisible, DEFAULT_SETTINGS.fpsVisible),
 		paused: bool(raw.paused, DEFAULT_SETTINGS.paused),
 		xRay: bool(raw.xRay, DEFAULT_SETTINGS.xRay),
+		jointLines: bool(raw.jointLines, DEFAULT_SETTINGS.jointLines),
 		tool:
 			typeof raw.tool === "string" && isToolId(raw.tool)
 				? raw.tool

@@ -70,6 +70,14 @@ export interface SceneView {
 			wy3: number,
 		) => void,
 	): void;
+	/**
+	 * Joint relationship lines, one call per SEGMENT (anchor → connected
+	 * body center), in document order — the joint-lines toggle's input. The
+	 * adapter resolves anchors and live centers so the renderer stays dumb.
+	 */
+	forEachJointLine(
+		fn: (ax: number, ay: number, bx: number, by: number) => void,
+	): void;
 	/** Thrusters with their live poses, in document order (P4-T5). */
 	forEachThruster(
 		fn: (
@@ -101,6 +109,11 @@ export interface Renderer {
 	gridSize: number;
 	/** X-ray mode (Paul, 2026-10-25): bodies draw translucent (view option). */
 	xRay: boolean;
+	/**
+	 * Joint-lines mode: dotted relationship lines from each joint's anchors
+	 * to the centers of the bodies it connects (view option).
+	 */
+	jointLines: boolean;
 }
 
 export interface RendererOptions {
@@ -196,6 +209,15 @@ export function createRenderer(
 	let xRayMode = false;
 	/** X-ray body alpha — a ghost, but still readable. */
 	const X_RAY_ALPHA = 0.3;
+	/**
+	 * Joint-lines mode (Paul, 2026-10-25): dotted lines from each joint's
+	 * anchors to the centers of the bodies it connects — the relationship
+	 * view for reading a machine's skeleton at a glance.
+	 */
+	let jointLinesMode = false;
+	/** Joint relationship lines: dotted, dim accent so glyphs stay primary. */
+	const JOINT_LINE_ALPHA = 0.45;
+	const JOINT_LINE_DASH = [4, 3];
 
 	function resize(cssWidthNew: number, cssHeightNew: number): void {
 		cssWidth = cssWidthNew;
@@ -413,6 +435,11 @@ export function createRenderer(
 				ctx.rotate(rot);
 				ctx.shadowColor = HOVER_GLOW;
 				ctx.shadowBlur = HOVER_GLOW_BLUR_PX;
+				// X-ray applies here too: a dragged body is always the hovered
+				// body, and it must stay translucent while being dragged (the
+				// live hover path used to draw it opaque, killing the view
+				// option exactly when aligning needed it — Paul, 2026-10-25).
+				if (xRayMode) ctx.globalAlpha = X_RAY_ALPHA;
 				ctx.beginPath();
 				traceShapePath(ctx, shape);
 				if (isStatic) {
@@ -500,6 +527,23 @@ export function createRenderer(
 		if (!scene) return;
 		const selected = new Set(scene.selectedIds());
 		const r = jointGlyphRadius(zoom);
+		// Joint-lines view (Paul, 2026-10-25): dotted anchor→center segments
+		// under the glyphs — the machine's skeleton, dim accent, screen
+		// dashes/width.
+		if (jointLinesMode) {
+			ctx.save();
+			ctx.strokeStyle = ACCENT_COLOR;
+			ctx.globalAlpha = JOINT_LINE_ALPHA;
+			ctx.lineWidth = 1 / zoom;
+			ctx.setLineDash(JOINT_LINE_DASH.map((d) => d / zoom));
+			ctx.beginPath();
+			scene.forEachJointLine((ax, ay, bx, by) => {
+				ctx.moveTo(ax, ay);
+				ctx.lineTo(bx, by);
+			});
+			ctx.stroke();
+			ctx.restore();
+		}
 		// PRD R2: glow is a selection affordance, not an every-glyph state —
 		// the blur raster is per-draw, and rope-heavy scenes draw hundreds of
 		// links. Shadow state toggles per item (selected only).
@@ -940,6 +984,37 @@ export function createRenderer(
 			ctx.stroke();
 			ctx.restore();
 			return;
+		} else if (p.kind === "snap") {
+			// Snap arming: dashed accent line from the mover's center to the
+			// cursor; the cursor ring is solid+filled over a valid target,
+			// dashed over empty space (the joint preview's convention).
+			ctx.save();
+			ctx.shadowColor = "transparent";
+			ctx.shadowBlur = 0;
+			ctx.beginPath();
+			ctx.moveTo(p.from.x, p.from.y);
+			ctx.lineTo(p.to.x, p.to.y);
+			ctx.stroke();
+			if (p.toBody) {
+				ctx.setLineDash([]);
+				ctx.beginPath();
+				ctx.arc(p.to.x, p.to.y, jointGlyphRadius(zoom), 0, Math.PI * 2);
+				ctx.stroke();
+				ctx.globalAlpha = 0.18;
+				ctx.fill();
+				ctx.globalAlpha = 1;
+			} else {
+				ctx.setLineDash([3 / zoom, 2 / zoom]);
+				ctx.beginPath();
+				ctx.arc(p.to.x, p.to.y, jointGlyphRadius(zoom), 0, Math.PI * 2);
+				ctx.stroke();
+				ctx.setLineDash([]);
+			}
+			ctx.beginPath();
+			ctx.arc(p.from.x, p.from.y, 2 / zoom, 0, Math.PI * 2);
+			ctx.fill();
+			ctx.restore();
+			return;
 		} else if (p.kind === "thruster-aim") {
 			// Drag-to-aim preview: a dashed accent ray from the mount toward
 			// the cursor with an open arrowhead — the thrust direction the
@@ -1070,6 +1145,12 @@ export function createRenderer(
 		},
 		set xRay(v: boolean) {
 			xRayMode = v;
+		},
+		get jointLines() {
+			return jointLinesMode;
+		},
+		set jointLines(v: boolean) {
+			jointLinesMode = v;
 		},
 	};
 }

@@ -1131,9 +1131,10 @@ export function attachToolControls(deps: ToolControlsDeps): () => void {
 
 	const pointerMods = (
 		event: PointerEvent,
-	): { shift: boolean; rotate: boolean } => ({
+	): { shift: boolean; rotate: boolean; alt: boolean } => ({
 		shift: event.shiftKey,
 		rotate: rotateHeld,
+		alt: event.altKey,
 	});
 
 	const onWindowBlur = (): void => {

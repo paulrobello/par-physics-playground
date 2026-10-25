@@ -17,6 +17,11 @@ export interface DrawOptionValues {
 	angleSnap: boolean;
 	/** View option: bodies draw translucent so occluded shapes stay visible. */
 	xRay: boolean;
+	/**
+	 * View option: dotted lines from each joint's anchors to the centers of
+	 * the bodies it connects.
+	 */
+	jointLines: boolean;
 }
 
 export interface DrawOptionsDeps {
@@ -64,6 +69,9 @@ export function attachDrawOptions(deps: DrawOptionsDeps): DrawOptionsHandle {
 		'[data-draw="angle-snap"]',
 	);
 	const xRay = deps.host.querySelector<HTMLInputElement>('[data-draw="x-ray"]');
+	const jointLines = deps.host.querySelector<HTMLInputElement>(
+		'[data-draw="joint-lines"]',
+	);
 	if (
 		!gridSize ||
 		!gridSizeOut ||
@@ -71,7 +79,8 @@ export function attachDrawOptions(deps: DrawOptionsDeps): DrawOptionsHandle {
 		!circleCenter ||
 		!boxSquare ||
 		!angleSnap ||
-		!xRay
+		!xRay ||
+		!jointLines
 	)
 		throw new Error("draw-option controls missing from the top bar");
 
@@ -104,6 +113,10 @@ export function attachDrawOptions(deps: DrawOptionsDeps): DrawOptionsHandle {
 			deps.renderer.xRay = values.xRay;
 			xRay.checked = values.xRay;
 		}
+		if (values.jointLines !== undefined) {
+			deps.renderer.jointLines = values.jointLines;
+			jointLines.checked = values.jointLines;
+		}
 	};
 
 	/** A user change: apply, then hand the full values to persistence. */
@@ -116,6 +129,7 @@ export function attachDrawOptions(deps: DrawOptionsDeps): DrawOptionsHandle {
 			constrainBox: deps.session.constrainBox,
 			angleSnap: deps.session.angleSnap,
 			xRay: deps.renderer.xRay,
+			jointLines: deps.renderer.jointLines,
 		});
 	};
 
@@ -140,6 +154,9 @@ export function attachDrawOptions(deps: DrawOptionsDeps): DrawOptionsHandle {
 	});
 	xRay.addEventListener("change", () => {
 		commit({ xRay: xRay.checked });
+	});
+	jointLines.addEventListener("change", () => {
+		commit({ jointLines: jointLines.checked });
 	});
 
 	return { apply };

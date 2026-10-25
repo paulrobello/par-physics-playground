@@ -19,6 +19,7 @@ const TOOL_HELP: Record<ToolId, string> = {
 	freehand: "Drag to sketch — the stroke closes into a shape on release",
 	text: "Click to place text, type, then Enter commits · double-click placed text to edit it",
 	joint: "Click body A, then body B (or empty space) to place the joint",
+	snap: "Click the body to move, then the body to snap onto — centers align · Alt+click picks a body underneath a stack · Escape cancels",
 	thruster:
 		"Click a body to mount the thruster, then drag to aim; release commits the direction",
 };

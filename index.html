@@ -84,6 +84,10 @@
 						<input type="checkbox" data-draw="x-ray" />
 						<span>X-Ray</span>
 					</label>
+					<label class="header-toggle" data-tip="Joint lines — dotted lines from each joint to the centers of the bodies it connects">
+						<input type="checkbox" data-draw="joint-lines" />
+						<span>Joint Lines</span>
+					</label>
 				</div>
 			</header>
 			<nav id="tool-rail" aria-label="Tools">
@@ -122,6 +126,9 @@
 						<svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="5" r="2.6" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M4.2 13.5L6.8 7.2M11.8 13.5L9.2 7.2" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
 					</label>
 				</span>
+				<label class="tool-btn" for="ppg-tool-snap" data-tool="snap" data-tip="Snap (N) — click a body, then a target; centers align. Alt+click picks a stacked body underneath"><input id="ppg-tool-snap" type="radio" name="tool" value="snap">
+					<svg viewBox="0 0 16 16" aria-hidden="true"><rect x="2.5" y="2.5" width="6" height="6" rx="1" fill="none" stroke="currentColor" stroke-width="1.5"/><rect x="7.5" y="7.5" width="6" height="6" rx="1" fill="none" stroke="currentColor" stroke-width="1.5" stroke-dasharray="2 1.5"/><circle cx="8" cy="8" r="1.3" fill="currentColor"/></svg>
+				</label>
 				<label class="tool-btn" for="ppg-tool-circle" data-tool="circle" data-tip="Circle (C)"><input id="ppg-tool-circle" type="radio" name="tool" value="circle">
 					<svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="5" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>
 				</label>

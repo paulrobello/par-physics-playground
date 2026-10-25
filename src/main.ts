@@ -50,6 +50,7 @@ import {
 	bodiesInRect,
 	type PickableBody,
 	pickBody,
+	pickBodyAtDepth,
 	pickJoint,
 	pickLabel,
 	pickThruster,
@@ -225,6 +226,33 @@ const sceneView = {
 					e.params.kind === "pulley" ? e.params.wheelX : anchors.b.x,
 					e.params.kind === "pulley" ? e.params.wheelY : anchors.b.y,
 				);
+		});
+	},
+	/**
+	 * Joint relationship lines (the joint-lines toggle's input): one call
+	 * per anchor→connected-body-center segment. Rope links are omitted —
+	 * their anchor sits ON the bead center so the segment is degenerate —
+	 * and a world-anchored joint (bodyB null) draws only its body side.
+	 */
+	forEachJointLine(
+		fn: (ax: number, ay: number, bx: number, by: number) => void,
+	): void {
+		const w = world;
+		if (!w) return;
+		w.eachJointEntity((e) => {
+			const anchors = w.jointWorldAnchors(e);
+			if (!anchors) return;
+			if (e.jointType === "rope") return;
+			const a = w.bodies.get(e.bodyA);
+			if (a) {
+				const t = a.translation();
+				fn(anchors.a.x, anchors.a.y, t.x, t.y);
+			}
+			const b = e.bodyB ? w.bodies.get(e.bodyB) : undefined;
+			if (b) {
+				const t = b.translation();
+				fn(anchors.b.x, anchors.b.y, t.x, t.y);
+			}
 		});
 	},
 	forEachLabel(
@@ -463,6 +491,23 @@ void (async () => {
 		beginAction: () => undoStack.beginAction(),
 		cancelAction: () => undoStack.cancelAction(),
 	});
+	// Snap tool wiring (Paul, 2026-10-25): bodies-only depth pick (Alt+click
+	// reaches stacked bodies), live body centers for the preview, and the
+	// completion — teleport the mover onto the target's center, one undo
+	// action for the whole gesture (arming press opened the snapshot).
+	events.pickBodyOnly = (wx, wy, depth = 0) =>
+		pickBodyAtDepth(listPickableBodies(), wx, wy, depth);
+	events.bodyCenter = (id) => {
+		const b = w.bodies.get(id);
+		return b ? { x: b.translation().x, y: b.translation().y } : undefined;
+	};
+	events.onSnapBodies = ({ moverId, targetId }) => {
+		const target = w.bodies.get(targetId);
+		if (!target || !w.bodies.has(moverId)) return;
+		const t = target.translation();
+		w.moveBody(moverId, t.x, t.y);
+		undoStack.commit();
+	};
 	session = new ToolSession(
 		events,
 		(wx, wy) =>
@@ -523,6 +568,7 @@ void (async () => {
 		constrainBox: settings.constrainBox,
 		angleSnap: settings.angleSnap,
 		xRay: settings.xRay,
+		jointLines: settings.jointLines,
 	});
 	// Bottom status bar: per-tool help + live scene census + FPS toggle.
 	const statusBarEl = document.querySelector<HTMLElement>("#status-bar");

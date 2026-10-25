@@ -7,6 +7,7 @@ import {
 	MIN_SPAWN_HALF_SIZE,
 	type PickableBody,
 	pickBody,
+	pickBodyAtDepth,
 	rectFromDrag,
 	ToolSession,
 	type ToolSessionEvents,
@@ -809,5 +810,161 @@ describe("ToolSession — joint tool (review F3/F4)", () => {
 		expect(session.selectedIds.has("b1")).toBe(true);
 		// setTool logs its own teardown-cancel; the IDLE kind switch adds none.
 		expect(log).toEqual([["cancel", null]]);
+	});
+});
+
+describe("pickBodyAtDepth", () => {
+	const stacked = [box("bottom", 0, 0, 10, 10), box("top", 0, 0, 5, 5)];
+	test("depth 0 is the topmost hit", () => {
+		expect(pickBodyAtDepth(stacked, 0, 0, 0)).toBe("top");
+	});
+	test("depth 1 is the body one beneath", () => {
+		expect(pickBodyAtDepth(stacked, 0, 0, 1)).toBe("bottom");
+	});
+	test("depth past the deepest clamps to the deepest", () => {
+		expect(pickBodyAtDepth(stacked, 0, 0, 9)).toBe("bottom");
+	});
+	test("a miss is undefined at any depth", () => {
+		expect(pickBodyAtDepth(stacked, 50, 50, 0)).toBeUndefined();
+	});
+});
+
+function makeSnapSession(bodies: PickableBody[]): {
+	session: ToolSession;
+	log: Recorded;
+} {
+	const log: Recorded = [];
+	const centers = new Map<string, { x: number; y: number }>();
+	for (const b of bodies) centers.set(b.id, { x: b.x, y: b.y });
+	const events: ToolSessionEvents = {
+		onSpawnBox() {},
+		onSpawnCircle() {},
+		onSpawnPolygon() {},
+		onSpawnLine() {},
+		onSpawnFreehand() {},
+		onCreateLabel() {
+			return "label-x";
+		},
+		onCommitLabel() {},
+		onDragStart() {},
+		onDragMove() {},
+		onDragEnd() {},
+		onRotateStart() {},
+		onRotate() {},
+		onRotateEnd() {},
+		onDelete() {},
+		onDuplicate() {
+			return [];
+		},
+		onBeginAction() {
+			log.push(["begin", null]);
+		},
+		onCancelAction() {
+			log.push(["cancel", null]);
+		},
+		pickBodyOnly(x, y, depth = 0) {
+			return pickBodyAtDepth(bodies, x, y, depth);
+		},
+		bodyCenter(id) {
+			return centers.get(id);
+		},
+		onSnapBodies(spec) {
+			log.push(["snap", spec]);
+		},
+	};
+	return {
+		session: new ToolSession(events, (x, y) => pickBody(bodies, x, y)),
+		log,
+	};
+}
+
+describe("ToolSession — snap tool", () => {
+	test("arm on a body, complete on a target: centers align via one event", () => {
+		const bodies = [box("mover", 10, 0, 5, 5), box("target", 60, 0, 5, 5)];
+		const { session, log } = makeSnapSession(bodies);
+		session.setTool("snap");
+		session.pointerDown(10, 0);
+		// setTool's teardown-cancel lands first (see the joint tests).
+		expect(log).toEqual([
+			["cancel", null],
+			["begin", null],
+		]);
+		session.pointerMove(60, 0);
+		expect(session.preview()).toMatchObject({
+			kind: "snap",
+			from: { x: 10, y: 0 },
+			to: { x: 60, y: 0 },
+			toBody: true,
+		});
+		session.pointerDown(60, 0);
+		expect(log).toEqual([
+			["cancel", null],
+			["begin", null],
+			["snap", { moverId: "mover", targetId: "target" }],
+		]);
+		expect(session.preview()).toBeNull();
+	});
+
+	test("second click on empty space aborts and drops the snapshot", () => {
+		const bodies = [box("mover", 10, 0, 5, 5), box("target", 60, 0, 5, 5)];
+		const { session, log } = makeSnapSession(bodies);
+		session.setTool("snap");
+		session.pointerDown(10, 0);
+		session.pointerDown(200, 200);
+		expect(log).toEqual([
+			["cancel", null],
+			["begin", null],
+			["cancel", null],
+		]);
+	});
+
+	test("clicking the mover again aborts (self-snap refused)", () => {
+		const bodies = [box("mover", 10, 0, 5, 5)];
+		const { session, log } = makeSnapSession(bodies);
+		session.setTool("snap");
+		session.pointerDown(10, 0);
+		session.pointerDown(12, 0);
+		expect(log).toEqual([
+			["cancel", null],
+			["begin", null],
+			["cancel", null],
+		]);
+	});
+
+	test("Alt+click on a stacked target picks the body beneath", () => {
+		// bottom spans x 0-20; top spans x 0-10 — a click at 5 hits both
+		// (topmost first), so alt picks bottom.
+		const bodies = [
+			box("bottom", 10, 0, 10, 5),
+			box("top", 5, 0, 5, 5),
+			box("mover", 60, 0, 5, 5),
+		];
+		const { session, log } = makeSnapSession(bodies);
+		session.setTool("snap");
+		session.pointerDown(60, 0); // arm on the lone mover
+		session.pointerMove(5, 0);
+		session.pointerDown(5, 0, { alt: true }); // beneath the topmost
+		expect(log.at(-1)).toEqual([
+			"snap",
+			{ moverId: "mover", targetId: "bottom" },
+		]);
+	});
+
+	test("Alt+click at the mover pick cycles the mover one deeper", () => {
+		const bodies = [
+			box("under", 10, 0, 10, 5),
+			box("over", 5, 0, 5, 5),
+			box("target", 60, 0, 5, 5),
+		];
+		const { session, log } = makeSnapSession(bodies);
+		session.setTool("snap");
+		session.pointerDown(5, 0); // arms on "over" (topmost)
+		session.pointerDown(5, 0, { alt: true }); // cycle: mover becomes "under"
+		session.pointerMove(60, 0);
+		session.pointerDown(60, 0);
+		expect(log.at(-1)).toEqual([
+			"snap",
+			{ moverId: "under", targetId: "target" },
+		]);
 	});
 });
