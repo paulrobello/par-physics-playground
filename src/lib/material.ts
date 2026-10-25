@@ -37,6 +37,14 @@ export interface Material {
 	 * fire-proof. The fire itself is runtime-only — never serialized.
 	 */
 	readonly flammable?: boolean;
+	/**
+	 * Melting: sustained thruster exhaust heat accumulates on a body of this
+	 * material and, after a fixed window of aimed heat, it disappears (see
+	 * melting.ts for the accumulation and removal rules). No fire, no spread;
+	 * on a body with both flags flammable wins. Optional; absent or false
+	 * means heat-proof. The heat is runtime-only — never serialized.
+	 */
+	readonly melting?: boolean;
 }
 
 /** The default palette entry; bodies and lookups fall back to it. */

@@ -189,6 +189,8 @@ const sceneView = {
 			color: string,
 			/** Runtime fire state (flammable.ts): true draws the flame glyph. */
 			burning: boolean,
+			/** Melt shrink cue (melting.ts): 1 = full size. */
+			meltScale: number,
 		) => void,
 	): void {
 		const w = world;
@@ -205,6 +207,7 @@ const sceneView = {
 				entity.isStatic,
 				w.doc.material(entity.materialId).color,
 				w.isBurning(id),
+				w.meltScaleOf(id),
 			);
 		}
 	},

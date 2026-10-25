@@ -37,6 +37,7 @@ import {
 	ROPE_LINK_STIFFNESS_PER_MASS,
 } from "./joint";
 import { MATERIAL_DEFAULT_ID } from "./material";
+import { isMeltedThrough, MELT_SECONDS, meltRenderScale } from "./melting";
 import { PULLEY_MIN_LEG, solvePulleyImpulse } from "./pulley";
 import { type ThrusterEntity, thrusterWorldPose } from "./thruster";
 import {
@@ -141,14 +142,17 @@ export class PhysicsWorld {
 	/** Armed (brittle) collider handles → owning body id (impact lookup). */
 	private readonly brittleColliders = new Map<number, DocumentId>();
 	/**
-	 * Flammable collider handles → owning body id: the exhaust-ray hit lookup
-	 * and the contact-spread pairing (see flammable.ts). Map-only arming —
-	 * contact-force events arm at IGNITION (ignite), so steady-state
-	 * flammable scenes generate no per-tick event traffic.
+	 * Heat-armed collider handles → owning body id (flammable + melting):
+	 * the exhaust-ray hit lookup and the contact-spread pairing (see
+	 * flammable.ts and melting.ts). Map-only arming — contact-force events
+	 * arm at IGNITION (ignite), so steady-state flammable scenes generate no
+	 * per-tick event traffic.
 	 */
-	private readonly flammableColliders = new Map<number, DocumentId>();
+	private readonly heatColliders = new Map<number, DocumentId>();
 	/** Accumulated burn seconds per burning body id (runtime fire state). */
 	private readonly burning = new Map<DocumentId, number>();
+	/** Accumulated exhaust-heat seconds per melting body id (runtime state). */
+	private readonly meltHeat = new Map<DocumentId, number>();
 	/** Elapsed thrusting burn time per thruster id (duration accounting). */
 	private readonly thrusterBurn = new Map<DocumentId, number>();
 	private readonly gearPhases = new Map<
@@ -268,7 +272,7 @@ export class PhysicsWorld {
 			entity.id,
 			body,
 			material.brittle === true,
-			material.flammable === true,
+			material.flammable === true || material.melting === true,
 		);
 		this.doc.add(entity);
 		this.bodies.set(entity.id, body);
@@ -396,6 +400,25 @@ export class PhysicsWorld {
 	 */
 	isBurning(id: DocumentId): boolean {
 		return this.burning.has(id);
+	}
+
+	/**
+	 * Render scale (1 = full size, below 1 = shrink cue) for a melting body's
+	 * accumulated heat — the renderer's melt cue; 1 for every non-melting
+	 * body (melting.ts).
+	 */
+	meltScaleOf(id: DocumentId): number {
+		const heat = this.meltHeat.get(id);
+		return heat === undefined ? 1 : meltRenderScale(heat);
+	}
+
+	/**
+	 * Accumulated melt heat as 0..1 of the melt window (0 for every body
+	 * that is not accumulating) — the debug API's probe for the e2e.
+	 */
+	meltProgressOf(id: DocumentId): number {
+		const heat = this.meltHeat.get(id);
+		return heat === undefined ? 0 : Math.min(1, heat / MELT_SECONDS);
 	}
 
 	/**
@@ -924,6 +947,7 @@ export class PhysicsWorld {
 		const material = this.doc.material(materialId);
 		const armed = material.brittle === true;
 		const flammable = material.flammable === true;
+		const melting = material.melting === true;
 		for (let i = 0; i < body.numColliders(); i++) {
 			const collider = body.collider(i);
 			collider.setDensity(material.density);
@@ -935,10 +959,12 @@ export class PhysicsWorld {
 					: RAPIER.ActiveEvents.NONE,
 			);
 		}
-		this.armColliders(id, body, armed, flammable);
-		// The fire is runtime state keyed to the material: repainting a burning
-		// body to a non-flammable material extinguishes it (flammable.ts).
+		this.armColliders(id, body, armed, flammable || melting);
+		// Runtime heat state is keyed to the material: repainting clears the
+		// fire or the melt clock a body no longer qualifies for (flammable.ts,
+		// melting.ts).
 		if (!flammable) this.burning.delete(id);
+		if (!melting) this.meltHeat.delete(id);
 		body.recomputeMassPropertiesFromColliders();
 		return true;
 	}
@@ -997,8 +1023,10 @@ export class PhysicsWorld {
 			this.thrusterBurn.delete(thruster.id);
 			this.onRemove?.(thruster.id);
 		}
-		// Fire state dies with the body (runtime-only; see flammable.ts).
+		// Fire and melt state die with the body (runtime-only; flammable.ts,
+		// melting.ts).
 		this.burning.delete(id);
+		this.meltHeat.delete(id);
 		const body = this.bodies.get(id);
 		if (body) {
 			this.disarmColliders(body);
@@ -1151,24 +1179,24 @@ export class PhysicsWorld {
 
 	/**
 	 * Track (or drop) a body's collider handles in the brittle-impact and
-	 * flammable-heat lookups. Only armed colliders are tracked, so worlds
-	 * without brittle or flammable bodies skip both per-tick paths entirely
-	 * (no allocation on the hot path). Flammable arming is map-only: the
+	 * heat (flammable + melting) lookups. Only armed colliders are tracked,
+	 * so worlds without any such bodies skip both per-tick paths entirely
+	 * (no allocation on the hot path). Heat arming is map-only: the
 	 * contact-force events arm at ignition — see {@link ignite}.
 	 */
 	private armColliders(
 		id: DocumentId,
 		body: RAPIER.RigidBody,
 		brittle: boolean,
-		flammable: boolean,
+		heat: boolean,
 	): void {
 		for (let i = 0; i < body.numColliders(); i++) {
 			const collider = body.collider(i);
 			if (!collider) continue;
 			if (brittle) this.brittleColliders.set(collider.handle, id);
 			else this.brittleColliders.delete(collider.handle);
-			if (flammable) this.flammableColliders.set(collider.handle, id);
-			else this.flammableColliders.delete(collider.handle);
+			if (heat) this.heatColliders.set(collider.handle, id);
+			else this.heatColliders.delete(collider.handle);
 		}
 	}
 
@@ -1178,7 +1206,7 @@ export class PhysicsWorld {
 			const collider = body.collider(i);
 			if (collider) {
 				this.brittleColliders.delete(collider.handle);
-				this.flammableColliders.delete(collider.handle);
+				this.heatColliders.delete(collider.handle);
 			}
 		}
 	}
@@ -1223,8 +1251,8 @@ export class PhysicsWorld {
 			// paired collider belongs to a not-yet-burning flammable body, it
 			// ignites. Collected and applied after the drain, like shatters.
 			if (this.burning.size > 0) {
-				const a = this.flammableColliders.get(event.collider1());
-				const b = this.flammableColliders.get(event.collider2());
+				const a = this.heatColliders.get(event.collider1());
+				const b = this.heatColliders.get(event.collider2());
 				if (a !== undefined && b !== undefined) {
 					if (this.burning.has(a) && !this.burning.has(b)) ignited.add(b);
 					else if (this.burning.has(b) && !this.burning.has(a)) ignited.add(a);
@@ -1236,12 +1264,13 @@ export class PhysicsWorld {
 	}
 
 	/**
-	 * Thruster exhaust heat (see flammable.ts): a firing thruster's exhaust
-	 * ray ignites the first flammable body it reaches; any other body the ray
-	 * reaches first blocks the exhaust. Called right after the Rapier tick
-	 * (Rapier's broad-phase fills on step, so earlier casts see an empty
-	 * world) against the live poses the renderer draws this frame. Per-tick
-	 * work touches only active thruster paths (spec perf rule).
+	 * Thruster exhaust heat (see flammable.ts, melting.ts): a firing
+	 * thruster's exhaust ray routes its FIRST hit — flammable → ignite,
+	 * melting → accumulate heat; anything else blocks the beam. Called right
+	 * after the Rapier tick (Rapier's broad-phase fills on step, so earlier
+	 * casts see an empty world) against the live poses the renderer draws
+	 * this frame. Per-tick work touches only active thruster paths (spec
+	 * perf rule).
 	 */
 	private applyThrusterHeat(): void {
 		for (const thruster of this.doc.thrusters()) {
@@ -1265,8 +1294,21 @@ export class PhysicsWorld {
 				mount,
 			);
 			if (!hit) continue;
-			const id = this.flammableColliders.get(hit.collider.handle);
-			if (id !== undefined) this.ignite(id);
+			const id = this.heatColliders.get(hit.collider.handle);
+			if (id === undefined) continue;
+			const entity = this.doc.get(id);
+			if (entity?.kind !== "body") continue;
+			const material = this.doc.material(entity.materialId);
+			// Flammable wins on a body with both flags (melting.ts): the burn
+			// removes it long before the melt window could complete.
+			if (material.flammable === true) {
+				this.ignite(id);
+			} else if (material.melting === true) {
+				// Cap at the threshold: the accumulator never overshoots, so the
+				// render scale reads cleanly and the tick math stays exact.
+				const heat = this.meltHeat.get(id) ?? 0;
+				this.meltHeat.set(id, Math.min(heat + SIM_DT_SECONDS, MELT_SECONDS));
+			}
 		}
 	}
 
@@ -1292,14 +1334,16 @@ export class PhysicsWorld {
 	}
 
 	/**
-	 * Fire bookkeeping (flammable.ts): burning bodies accumulate burn time
-	 * and stay AWAKE (a sleeping fire's contact pairs stop producing the
-	 * spread events the drain needs); a body past BURN_SECONDS is consumed
-	 * through the ordinary removeBody cascade — the brittle removal
-	 * precedent, no undo boundary.
+	 * Fire and melt bookkeeping (flammable.ts, melting.ts): burning bodies
+	 * accumulate burn time and stay AWAKE (a sleeping fire's contact pairs
+	 * stop producing the spread events the drain needs); a body past
+	 * BURN_SECONDS or one whose accumulated melt heat reached MELT_SECONDS
+	 * is consumed through the ordinary removeBody cascade — the brittle
+	 * removal precedent, no undo boundary. Melt heat only accrues on
+	 * aimed-at ticks (applyThrusterHeat) and holds between passes.
 	 */
 	private applyFireTicks(): void {
-		if (this.burning.size === 0) return;
+		if (this.burning.size === 0 && this.meltHeat.size === 0) return;
 		for (const [id, burned] of this.burning) {
 			const body = this.bodies.get(id);
 			if (!body) {
@@ -1310,6 +1354,13 @@ export class PhysicsWorld {
 			const total = burned + SIM_DT_SECONDS;
 			if (isBurnedOut(total)) this.removeBody(id);
 			else this.burning.set(id, total);
+		}
+		for (const [id, heat] of this.meltHeat) {
+			if (!this.bodies.has(id)) {
+				this.meltHeat.delete(id);
+				continue;
+			}
+			if (isMeltedThrough(heat)) this.removeBody(id);
 		}
 	}
 

@@ -34,6 +34,12 @@ export interface SceneView {
 			color: string,
 			/** Runtime fire state (flammable.ts): true draws the flame glyph. */
 			burning: boolean,
+			/**
+			 * Melt shrink cue (melting.ts): 1 = full size; below 1 the body
+			 * draws scaled down over the melt window's final second. The
+			 * collider keeps its true size — the cue is render-only.
+			 */
+			meltScale: number,
 		) => void,
 	): void;
 	/** Non-physical labels, in document order (drawn above bodies). */
@@ -457,84 +463,87 @@ export function createRenderer(
 		// plume — pausing time freezes the fire.
 		const t = scene.simTime();
 		seenScratch.clear();
-		scene.forEachBody((id, shape, x, y, rot, isStatic, color, burning) => {
-			const hovered = id === hoverId;
-			seenScratch.add(id);
-			if (hovered) {
-				// The one live path: hover glow (lift only for dynamic bodies,
-				// static geometry does not hover-lift).
-				ctx.save();
-				ctx.translate(x, !isStatic ? y - lift : y);
-				ctx.rotate(rot);
-				ctx.shadowColor = HOVER_GLOW;
-				ctx.shadowBlur = HOVER_GLOW_BLUR_PX;
-				// X-ray applies here too: a dragged body is always the hovered
-				// body, and it must stay translucent while being dragged (the
-				// live hover path used to draw it opaque, killing the view
-				// option exactly when aligning needed it — Paul, 2026-10-25).
-				if (xRayMode) ctx.globalAlpha = X_RAY_ALPHA;
-				ctx.beginPath();
-				traceShapePath(ctx, shape);
-				if (isStatic) {
-					ctx.fillStyle = STATIC_FILL;
-					ctx.fill();
-					ctx.shadowColor = "transparent";
-					ctx.shadowBlur = 0;
-					ctx.strokeStyle = GROUND_COLOR;
-					ctx.lineWidth = STATIC_STROKE_WIDTH_PX / zoom;
+		scene.forEachBody(
+			(id, shape, x, y, rot, isStatic, color, burning, meltScale) => {
+				const hovered = id === hoverId;
+				seenScratch.add(id);
+				if (hovered) {
+					// The one live path: hover glow (lift only for dynamic bodies,
+					// static geometry does not hover-lift).
+					ctx.save();
+					ctx.translate(x, !isStatic ? y - lift : y);
+					ctx.rotate(rot);
+					// The melt cue scales the live path too — a hovered melting
+					// body shrinks exactly like its sprite path (melting.ts).
+					if (meltScale !== 1) ctx.scale(meltScale, meltScale);
+					ctx.shadowColor = HOVER_GLOW;
+					ctx.shadowBlur = HOVER_GLOW_BLUR_PX;
+					// X-ray applies here too: a dragged body is always the hovered
+					// body, and it must stay translucent while being dragged (the
+					// live hover path used to draw it opaque, killing the view
+					// option exactly when aligning needed it — Paul, 2026-10-25).
+					if (xRayMode) ctx.globalAlpha = X_RAY_ALPHA;
+					ctx.beginPath();
+					traceShapePath(ctx, shape);
+					if (isStatic) {
+						ctx.fillStyle = STATIC_FILL;
+						ctx.fill();
+						ctx.shadowColor = "transparent";
+						ctx.shadowBlur = 0;
+						ctx.strokeStyle = GROUND_COLOR;
+						ctx.lineWidth = STATIC_STROKE_WIDTH_PX / zoom;
+						ctx.stroke();
+					} else {
+						ctx.fillStyle = color;
+						ctx.fill();
+					}
+					ctx.restore();
+					// Hover center helper (Paul, 2026-10-25): the point every joint
+					// placement and snap infers — crosshair + ring at the body
+					// center, world axis, screen-constant size. Drawn after restore
+					// so it never rotates with the body.
+					ctx.save();
+					ctx.strokeStyle = ACCENT_COLOR;
+					ctx.lineWidth = 1 / zoom;
+					ctx.beginPath();
+					ctx.arc(x, y, 4 / zoom, 0, Math.PI * 2);
+					ctx.moveTo(x - 7 / zoom, y);
+					ctx.lineTo(x + 7 / zoom, y);
+					ctx.moveTo(x, y - 7 / zoom);
+					ctx.lineTo(x, y + 7 / zoom);
 					ctx.stroke();
-				} else {
-					ctx.fillStyle = color;
-					ctx.fill();
+					ctx.restore();
+					if (burning) drawFlameGlyph(id, x, y, zoom, t);
+					return;
 				}
-				ctx.restore();
-				// Hover center helper (Paul, 2026-10-25): the point every joint
-				// placement and snap infers — crosshair + ring at the body
-				// center, world axis, screen-constant size. Drawn after restore
-				// so it never rotates with the body.
+				let sprite = bodySprites.get(id);
+				if (
+					!sprite ||
+					sprite.shape !== shape ||
+					sprite.color !== color ||
+					sprite.isStatic !== isStatic ||
+					sprite.dpr !== dpr ||
+					Math.abs(sprite.zoom / zoom - 1) > SPRITE_ZOOM_DRIFT
+				) {
+					sprite = rasterizeBodySprite(shape, color, isStatic, zoom, dpr);
+					bodySprites.set(id, sprite);
+				}
 				ctx.save();
-				ctx.strokeStyle = ACCENT_COLOR;
-				ctx.lineWidth = 1 / zoom;
-				ctx.beginPath();
-				ctx.arc(x, y, 4 / zoom, 0, Math.PI * 2);
-				ctx.moveTo(x - 7 / zoom, y);
-				ctx.lineTo(x + 7 / zoom, y);
-				ctx.moveTo(x, y - 7 / zoom);
-				ctx.lineTo(x, y + 7 / zoom);
-				ctx.stroke();
+				ctx.translate(x, y);
+				ctx.rotate(rot);
+				// X-ray (Paul, 2026-10-25): the whole pre-rendered sprite — fill,
+				// stroke, shadow — draws translucent, so shapes underneath stay
+				// visible; selection outlines keep full strength above.
+				if (xRayMode) ctx.globalAlpha = X_RAY_ALPHA;
+				// Melt shrink cue (melting.ts): render-only, the collider keeps its
+				// true size until the removal.
+				const halfW = sprite.halfW * meltScale;
+				const halfH = sprite.halfH * meltScale;
+				ctx.drawImage(sprite.canvas, -halfW, -halfH, halfW * 2, halfH * 2);
 				ctx.restore();
 				if (burning) drawFlameGlyph(id, x, y, zoom, t);
-				return;
-			}
-			let sprite = bodySprites.get(id);
-			if (
-				!sprite ||
-				sprite.shape !== shape ||
-				sprite.color !== color ||
-				sprite.isStatic !== isStatic ||
-				sprite.dpr !== dpr ||
-				Math.abs(sprite.zoom / zoom - 1) > SPRITE_ZOOM_DRIFT
-			) {
-				sprite = rasterizeBodySprite(shape, color, isStatic, zoom, dpr);
-				bodySprites.set(id, sprite);
-			}
-			ctx.save();
-			ctx.translate(x, y);
-			ctx.rotate(rot);
-			// X-ray (Paul, 2026-10-25): the whole pre-rendered sprite — fill,
-			// stroke, shadow — draws translucent, so shapes underneath stay
-			// visible; selection outlines keep full strength above.
-			if (xRayMode) ctx.globalAlpha = X_RAY_ALPHA;
-			ctx.drawImage(
-				sprite.canvas,
-				-sprite.halfW,
-				-sprite.halfH,
-				sprite.halfW * 2,
-				sprite.halfH * 2,
-			);
-			ctx.restore();
-			if (burning) drawFlameGlyph(id, x, y, zoom, t);
-		});
+			},
+		);
 		// Prune sprites of bodies that left the document (deletes, restores).
 		if (bodySprites.size > seenScratch.size + 64) {
 			for (const id of bodySprites.keys()) {

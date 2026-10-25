@@ -34,6 +34,8 @@ export interface MaterialRecordV1 {
 	brittle?: boolean;
 	/** Flammable flag (optional; absent = false) preserved across sessions. */
 	flammable?: boolean;
+	/** Melting flag (optional; absent = false) preserved across sessions. */
+	melting?: boolean;
 }
 
 export interface MaterialStore {
@@ -56,6 +58,7 @@ function parseRecord(value: unknown): Material | null {
 		restitution?: unknown;
 		brittle?: unknown;
 		flammable?: unknown;
+		melting?: unknown;
 	};
 	if (r.schema !== 1) return null;
 	if (
@@ -71,6 +74,7 @@ function parseRecord(value: unknown): Material | null {
 	if (r.brittle !== undefined && typeof r.brittle !== "boolean") return null;
 	if (r.flammable !== undefined && typeof r.flammable !== "boolean")
 		return null;
+	if (r.melting !== undefined && typeof r.melting !== "boolean") return null;
 	if (MATERIAL_PREDEFINED.some((m) => m.id === r.id)) return null;
 	const material: Material = {
 		id: r.id,
@@ -81,6 +85,7 @@ function parseRecord(value: unknown): Material | null {
 		restitution: r.restitution,
 		...(r.brittle ? { brittle: true } : {}),
 		...(r.flammable ? { flammable: true } : {}),
+		...(r.melting ? { melting: true } : {}),
 	};
 	return materialValuesError({
 		name: material.name,

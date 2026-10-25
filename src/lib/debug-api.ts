@@ -77,6 +77,11 @@ export interface DebugApi {
 	bodyMass(id: DocumentId): number | undefined;
 	/** Whether a body is currently burning (runtime fire state; flammable.ts). */
 	isBurning(id: DocumentId): boolean;
+	/**
+	 * Melt heat progress 0..1 of the melt window for a melting body
+	 * (runtime state; melting.ts) — 0 when not accumulating.
+	 */
+	meltProgress(id: DocumentId): number;
 	/** All registered materials (palette + customs), registry order. */
 	materials(): Material[];
 	/** The material id new draw-tool spawns take (panel active material). */
@@ -264,6 +269,9 @@ export function installDebugApi(
 		},
 		isBurning(id) {
 			return world.isBurning(id);
+		},
+		meltProgress(id) {
+			return world.meltProgressOf(id);
 		},
 		materials() {
 			return world.doc.allMaterials();

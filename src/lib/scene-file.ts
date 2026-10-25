@@ -127,6 +127,9 @@ function checkMaterial(raw: unknown, index: number): string | null {
 	if (m.flammable !== undefined && typeof m.flammable !== "boolean") {
 		return `customMaterials[${index}].flammable: not a boolean`;
 	}
+	if (m.melting !== undefined && typeof m.melting !== "boolean") {
+		return `customMaterials[${index}].melting: not a boolean`;
+	}
 	return null;
 }
 
