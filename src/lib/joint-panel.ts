@@ -81,7 +81,7 @@ export function attachJointPanel(deps: JointPanelDeps): () => void {
 	/** Apply a thruster edit inside ONE undo boundary. */
 	const applyThruster = (
 		id: string,
-		patch: Partial<Pick<ThrusterEntity, "strength" | "on">>,
+		patch: Partial<Pick<ThrusterEntity, "strength" | "on" | "angle">>,
 	): void => {
 		undo.beginAction();
 		world.updateThruster(id, patch);
@@ -233,12 +233,19 @@ export function attachJointPanel(deps: JointPanelDeps): () => void {
 
 	/**
 	 * Thruster controls (P4-T5): strength number + the on/off checkbox, each
-	 * edit inside ONE undo boundary via updateThruster.
+	 * edit inside ONE undo boundary via updateThruster. The Angle field (the
+	 * aiming affordance) edits the body-local direction in DEGREES — 0 points
+	 * along +x in the body's frame, rotating with the body like the mount
+	 * anchor.
 	 */
 	const buildThrusterControls = (id: string, entity: ThrusterEntity): void => {
+		const angleDeg = Math.round((entity.angle * 180) / Math.PI);
 		paramsEl.innerHTML = `
 			<label class="joint-field">Force
 				<input type="number" step="500" min="0" data-thruster-strength value="${entity.strength}" />
+			</label>
+			<label class="joint-field">Angle (°, body-local)
+				<input type="number" step="15" data-thruster-angle value="${angleDeg}" />
 			</label>
 			<label class="joint-field">
 				<input type="checkbox" data-thruster-on ${entity.on ? "checked" : ""} />
@@ -251,6 +258,13 @@ export function attachJointPanel(deps: JointPanelDeps): () => void {
 				const value = (ev.target as HTMLInputElement).valueAsNumber;
 				if (Number.isFinite(value) && value >= 0)
 					applyThruster(id, { strength: value });
+			});
+		paramsEl
+			.querySelector<HTMLInputElement>("[data-thruster-angle]")
+			?.addEventListener("change", (ev) => {
+				const value = (ev.target as HTMLInputElement).valueAsNumber;
+				if (Number.isFinite(value))
+					applyThruster(id, { angle: (value * Math.PI) / 180 });
 			});
 		paramsEl
 			.querySelector<HTMLInputElement>("[data-thruster-on]")

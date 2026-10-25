@@ -41,6 +41,7 @@ import {
 	pickThruster,
 	ToolSession,
 } from "./lib/tools";
+import { attachTooltips } from "./lib/tooltips";
 import { UndoStack } from "./lib/undo";
 import { type BodyShape, PhysicsWorld } from "./lib/world";
 import { createRenderer } from "./renderer";
@@ -283,6 +284,11 @@ const simPump = createSimPump(
 	},
 	() => performance.now(),
 );
+
+// Widget tooltips: ONE body-level element for every data-tip control. Must
+// attach before any control renders its first hover — module level, app
+// lifetime.
+attachTooltips();
 
 const renderer = createRenderer(canvas, {
 	camera,

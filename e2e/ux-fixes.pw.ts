@@ -2,9 +2,11 @@ import { expect, type Page, test } from "@playwright/test";
 
 /**
  * UX fixes batch: widget tooltips (no native titles, hover + keyboard
- * paths), and the demo camera centering the scene's content bounds in the
- * visible canvas. The sim-stall pump is pinned by unit tests
- * (tests/unit/sim-pump.test.ts) — an e2e rate assert would be a load flake.
+ * paths), the demo camera centering the scene's content bounds in the
+ * visible canvas, and the text tool's label edit working after a MOUSE
+ * tool-button click (the radio keeps focus; the label edit must own the
+ * keyboard regardless). The sim-stall pump and catch-up-cap change are
+ * pinned by unit tests — e2e rate asserts would be load flakes.
  */
 
 test.describe("widget tooltips", () => {
@@ -24,40 +26,76 @@ test.describe("widget tooltips", () => {
 		expect(await page.locator("[title]").count()).toBe(0);
 	});
 
-	test("hover shows the styled tooltip after its delay", async () => {
+	test("hover shows the widget tooltip after its delay", async () => {
 		const label = page.locator('[data-tool="box"]');
 		await label.hover();
-		await page.waitForTimeout(700);
-		const opacity = await label.evaluate(
-			(el) => getComputedStyle(el, "::after").opacity,
-		);
-		expect(Number(opacity)).toBe(1);
-		const content = await label.evaluate(
-			(e) => getComputedStyle(e, "::after").content,
-		);
-		expect(content).toContain("Box (B)");
+		await page.waitForTimeout(700); // 400ms delay + transition
+		const tip = page.locator(".ppg-tooltip.visible");
+		await expect(tip).toBeVisible();
+		await expect(tip).toHaveText("Box (B)");
+		// The widget is body-level and fixed-position — it renders even
+		// though the rail's ancestors clip their overflow.
+		const box = await tip.boundingBox();
+		expect(box).not.toBeNull();
+		expect(box!.width).toBeGreaterThan(10);
 	});
 
-	test("keyboard focus shows the tooltip (:focus-within path)", async () => {
+	test("keyboard focus shows the tooltip (focusin path)", async () => {
+		await page.mouse.move(10, 500); // clear hover
+		await page.waitForTimeout(200);
 		await page.locator("#ppg-tool-box").focus();
 		await page.waitForTimeout(700);
-		const opacity = await page
-			.locator('[data-tool="box"]')
-			.evaluate((el) => getComputedStyle(el, "::after").opacity);
-		expect(Number(opacity)).toBe(1);
+		await expect(page.locator(".ppg-tooltip.visible")).toHaveText("Box (B)");
 	});
 
-	test("top-bar buttons open their tooltip BELOW, rail buttons to the RIGHT", async () => {
-		// Position contract via computed top offsets (below = 100% + 9px;
-		// right = 50% vertical). Compare the resolved 'top' differs between
-		// variants rather than parsing calc().
-		const railTop = await page
-			.locator('[data-tool="box"]')
-			.evaluate((el) => getComputedStyle(el, "::after").top);
-		const topBarTop = await page
-			.locator('[data-sim="demo"]')
-			.evaluate((el) => getComputedStyle(el, "::after").top);
-		expect(railTop).not.toBe(topBarTop);
+	test("top-bar button opens its tooltip BELOW its box; rail button to the RIGHT", async () => {
+		await page.locator('[data-sim="demo"]').hover();
+		await page.waitForTimeout(700);
+		const tipBox = await page.locator(".ppg-tooltip.visible").boundingBox();
+		const btnBox = await page.locator('[data-sim="demo"]').boundingBox();
+		if (!tipBox || !btnBox) throw new Error("boxes missing");
+		// Below: the tip's top starts at or under the button's bottom edge.
+		expect(tipBox.y).toBeGreaterThanOrEqual(btnBox.y + btnBox.height - 2);
+		await page.mouse.move(640, 400);
+		await page.waitForTimeout(300);
+		const railTip = await page.locator('[data-tool="box"]').evaluate((el) => {
+			el.dispatchEvent(new PointerEvent("pointerover", { bubbles: true }));
+			return null;
+		});
+		void railTip;
+		await page.waitForTimeout(700);
+		const tip2 = await page.locator(".ppg-tooltip.visible").boundingBox();
+		const btn2 = await page.locator('[data-tool="box"]').boundingBox();
+		if (!tip2 || !btn2) throw new Error("boxes missing");
+		// Right: the tip's left edge starts at or past the button's right edge.
+		expect(tip2.x).toBeGreaterThanOrEqual(btn2.x + btn2.width - 2);
+	});
+});
+
+test.describe("text tool label edit (mouse tool-button path)", () => {
+	test("click the text button, click canvas, type — the label takes the text", async ({
+		page,
+	}) => {
+		await page.goto("/?debug=1");
+		await page.waitForFunction(() => window.__ppg !== undefined);
+		// MOUSE-click the text tool label (focus lands on the radio input —
+		// the regression: typing was swallowed while the radio held focus).
+		await page.locator('[data-tool="text"]').click();
+		await page.locator('[data-tool="text"] input').waitFor({
+			state: "attached",
+		});
+		const stage = await page.locator("#stage").boundingBox();
+		if (!stage) throw new Error("stage missing");
+		await page.mouse.click(stage.x + 400, stage.y + 300);
+		// Type with the radio STILL focused — the exact broken flow.
+		await page.keyboard.type("Hello Paul");
+		await page.keyboard.press("Enter");
+		const text = await page.evaluate(() => {
+			const ents = window.__ppg!.documentAll();
+			const label = ents.find((e) => e.kind === "label");
+			return label?.text ?? null;
+		});
+		expect(text).toBe("Hello Paul");
 	});
 });
 

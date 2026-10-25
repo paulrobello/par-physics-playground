@@ -992,23 +992,15 @@ export function attachToolControls(deps: ToolControlsDeps): () => void {
 
 	const onKeyDown = (event: KeyboardEvent): void => {
 		// Duplicate takes Ctrl/Cmd+D; the other shortcuts reject modifiers.
-		// Text-entry targets keep their keys (matches camera-controls) — but
-		// Escape always cancels: the joint-kind radios keep FOCUS after their
-		// label click, and the pulley's three-click flow must cancel with the
-		// radio still focused (a focused number input keeps its value too).
-		if (
-			event.target instanceof HTMLElement &&
-			(event.target.tagName === "INPUT" ||
-				event.target.tagName === "TEXTAREA" ||
-				event.target.isContentEditable) &&
-			event.code !== "Escape"
-		)
-			return;
 		// Inline label edit: keys are the label text itself. Enter and Escape
-		// commit; printable characters append; Backspace deletes. The branch
-		// runs BEFORE every shortcut (including Cmd/Ctrl+Z): a label edit owns
-		// the keyboard, so undo/redo must not commit-then-undo the label, and
-		// modified keys (Cmd+Z etc.) are swallowed, not typed.
+		// commit; printable characters append; Backspace deletes. This branch
+		// runs FIRST — before the text-entry-target guard below — because a
+		// tool radio keeps FOCUS after its label click, and the edit must own
+		// the keyboard regardless of where focus sits (typing into a new
+		// label with the radio focused is the normal text-tool flow). It also
+		// runs before every shortcut (including Cmd/Ctrl+Z): a label edit
+		// owns the keyboard, so undo/redo must not commit-then-undo the
+		// label, and modified keys (Cmd+Z etc.) are swallowed, not typed.
 		if (session.isEditingText()) {
 			const action = classifyEditKey(event);
 			if (action === "commit") {
@@ -1024,6 +1016,18 @@ export function attachToolControls(deps: ToolControlsDeps): () => void {
 			// "ignore" (modifier combos, F-keys, …): swallowed, edit continues.
 			return;
 		}
+		// Text-entry targets keep their keys (matches camera-controls) — but
+		// Escape always cancels: the joint-kind radios keep FOCUS after their
+		// label click, and the pulley's three-click flow must cancel with the
+		// radio still focused (a focused number input keeps its value too).
+		if (
+			event.target instanceof HTMLElement &&
+			(event.target.tagName === "INPUT" ||
+				event.target.tagName === "TEXTAREA" ||
+				event.target.isContentEditable) &&
+			event.code !== "Escape"
+		)
+			return;
 		if (event.code === "KeyR" && !event.repeat) syncRotate(true);
 		if ((event.ctrlKey || event.metaKey) && event.code === "KeyD") {
 			event.preventDefault();

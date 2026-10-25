@@ -30,7 +30,7 @@ export class SimClock {
 
 	constructor(options: SimClockOptions = {}) {
 		this.fixedDtSeconds = SIM_DT_SECONDS;
-		this.maxCatchUpSteps = options.maxCatchUpSteps ?? 5;
+		this.maxCatchUpSteps = options.maxCatchUpSteps ?? 24;
 		if (
 			!Number.isFinite(this.fixedDtSeconds) ||
 			this.fixedDtSeconds <= 0 ||
