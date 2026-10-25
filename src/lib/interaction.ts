@@ -715,6 +715,75 @@ export function createToolEvents(
 			recordAction();
 			return entity.id;
 		},
+		onPlaceJointChain(spec) {
+			// Shift+click (Paul, 2026-10-25): tie consecutive pairs of `ids`
+			// at the click point — the WHOLE chain is one undo action. Bodies
+			// that vanished mid-gesture are skipped; with none left the undo
+			// snapshot drops.
+			beginAction();
+			let placed = 0;
+			for (let i = 0; i + 1 < spec.ids.length; i++) {
+				const a = world.bodies.get(spec.ids[i]!);
+				const b = world.bodies.get(spec.ids[i + 1]!);
+				if (!a || !b) continue;
+				const entity = makePlacedJoint(
+					freshJointId(),
+					spec.jointKind,
+					spec.ids[i]!,
+					spec.ids[i + 1]!,
+					{ x: spec.x, y: spec.y },
+					{ x: spec.x, y: spec.y },
+					{
+						x: a.translation().x,
+						y: a.translation().y,
+						rot: a.rotation(),
+					},
+					{
+						x: b.translation().x,
+						y: b.translation().y,
+						rot: b.rotation(),
+					},
+				);
+				if (entity && world.spawnJoint(entity)) placed += 1;
+			}
+			if (placed > 0) recordAction();
+			else deps?.cancelAction?.();
+			return placed;
+		},
+		onPlaceSnapJoint(spec) {
+			// Snap-Join mode: teleport the mover so its clicked point lands on
+			// the target click's point, THEN place the joint at that shared
+			// point (one undo action). Spawn precedes the move so a refused
+			// joint cannot leave a teleport outside undo history.
+			beginAction();
+			const target = world.bodies.get(spec.targetId);
+			const mover = world.bodies.get(spec.moverId);
+			if (!target || !mover) {
+				deps?.cancelAction?.();
+				return undefined;
+			}
+			const t = target.translation();
+			const before = mover.translation();
+			const x = before.x + spec.targetPoint.x - spec.moverPoint.x;
+			const y = before.y + spec.targetPoint.y - spec.moverPoint.y;
+			const entity = makePlacedJoint(
+				freshJointId(),
+				spec.jointKind,
+				spec.targetId,
+				spec.moverId,
+				spec.targetPoint,
+				spec.targetPoint,
+				{ x: t.x, y: t.y, rot: target.rotation() },
+				{ x, y, rot: mover.rotation() },
+			);
+			if (!entity || !world.spawnJoint(entity)) {
+				deps?.cancelAction?.();
+				return undefined;
+			}
+			world.moveBody(spec.moverId, x, y);
+			recordAction();
+			return entity.id;
+		},
 		onPlaceThruster(spec) {
 			beginAction();
 			const body = world.bodies.get(spec.bodyId);
@@ -942,6 +1011,13 @@ export function attachToolControls(deps: ToolControlsDeps): () => void {
 	const jointKindButtons = Array.from(
 		toolbar.querySelectorAll<HTMLLabelElement>("[data-joint-kind]"),
 	);
+	// Snap-Join mode toggle (orthogonal to the joint kind; see ToolSession).
+	const snapJoinInput = toolbar.querySelector<HTMLInputElement>(
+		"[data-joint-snap-join] input",
+	);
+	snapJoinInput?.addEventListener("change", () => {
+		session.snapJoin = snapJoinInput.checked;
+	});
 
 	// Undo/redo buttons: disabled when the respective stack is empty.
 	const undoButtons = {
@@ -980,6 +1056,7 @@ export function attachToolControls(deps: ToolControlsDeps): () => void {
 			const input = label.querySelector("input");
 			if (input) input.checked = active;
 		}
+		if (snapJoinInput) snapJoinInput.checked = session.snapJoin;
 	}
 
 	const setToolAndSync = (tool: ToolId): void => {

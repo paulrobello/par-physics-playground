@@ -6,6 +6,7 @@ import {
 	constrainSegment,
 	MIN_SPAWN_HALF_SIZE,
 	type PickableBody,
+	pickAllBodies,
 	pickBody,
 	pickBodyAtDepth,
 	rectFromDrag,
@@ -965,6 +966,132 @@ describe("ToolSession — snap tool", () => {
 		expect(log.at(-1)).toEqual([
 			"snap",
 			{ moverId: "under", targetId: "target" },
+		]);
+	});
+});
+
+function makeJointModesSession(bodies: PickableBody[]): {
+	session: ToolSession;
+	log: Recorded;
+} {
+	const log: Recorded = [];
+	const events: ToolSessionEvents = {
+		onSpawnBox() {},
+		onSpawnCircle() {},
+		onSpawnPolygon() {},
+		onSpawnLine() {},
+		onSpawnFreehand() {},
+		onCreateLabel() {
+			return "label-x";
+		},
+		onCommitLabel() {},
+		onDragStart() {},
+		onDragMove() {},
+		onDragEnd() {},
+		onRotateStart() {},
+		onRotate() {},
+		onRotateEnd() {},
+		onDelete() {},
+		onDuplicate() {
+			return [];
+		},
+		onBeginAction() {
+			log.push(["begin", null]);
+		},
+		onCancelAction() {
+			log.push(["cancel", null]);
+		},
+		onPlaceJoint(spec) {
+			log.push([
+				"place",
+				{ a: spec.bodyAId, b: spec.bodyBId, kind: spec.jointKind },
+			]);
+			return "j1";
+		},
+		onPlaceJointChain(spec) {
+			log.push([
+				"chain",
+				{ ids: spec.ids, kind: spec.jointKind, x: spec.x, y: spec.y },
+			]);
+			return spec.ids.length - 1;
+		},
+		onPlaceSnapJoint(spec) {
+			log.push(["snapjoint", spec]);
+			return "sj1";
+		},
+		pickAllBodies(x, y) {
+			return pickAllBodies(bodies, x, y);
+		},
+	};
+	return {
+		session: new ToolSession(events, (x, y) => pickBody(bodies, x, y)),
+		log,
+	};
+}
+
+describe("ToolSession — joint modes", () => {
+	test("pickAllBodies returns the stack topmost-first", () => {
+		const stacked = [box("bottom", 0, 0, 10, 10), box("top", 0, 0, 5, 5)];
+		expect(pickAllBodies(stacked, 0, 0)).toEqual(["top", "bottom"]);
+		expect(pickAllBodies(stacked, 50, 50)).toEqual([]);
+	});
+
+	test("Shift+click on a stack places the chain immediately", () => {
+		const bodies = [box("bottom", 0, 0, 10, 10), box("top", 0, 0, 5, 5)];
+		const { session, log } = makeJointModesSession(bodies);
+		session.setTool("joint");
+		session.pointerDown(0, 0, { shift: true });
+		expect(log.at(-1)).toEqual([
+			"chain",
+			{ ids: ["top", "bottom"], kind: "pin", x: 0, y: 0 },
+		]);
+	});
+
+	test("Shift+click on a lone body arms; a shift second click chains A with it", () => {
+		const bodies = [box("solo", 0, 0, 5, 5), box("far", 60, 0, 5, 5)];
+		const { session, log } = makeJointModesSession(bodies);
+		session.setTool("joint");
+		session.pointerDown(0, 0, { shift: true });
+		expect(log.some(([k]) => k === "chain")).toBe(false);
+		session.pointerDown(60, 0, { shift: true });
+		// Arming + shift: chain ids = [bodyA, ...stack minus bodyA].
+		expect(log.at(-1)).toEqual([
+			"chain",
+			{ ids: ["solo", "far"], kind: "pin", x: 60, y: 0 },
+		]);
+	});
+
+	test("Snap-Join mode snaps the second body to the first, joint at shared center", () => {
+		const bodies = [box("target", 0, 0, 10, 5), box("mover", 60, 0, 5, 5)];
+		const { session, log } = makeJointModesSession(bodies);
+		session.setTool("joint");
+		session.snapJoin = true;
+		session.pointerDown(0, 0);
+		session.pointerDown(60, 0);
+		expect(log.at(-1)).toEqual([
+			"snapjoint",
+			{
+				targetId: "target",
+				moverId: "mover",
+				jointKind: "pin",
+				targetPoint: { x: 0, y: 0 },
+				moverPoint: { x: 60, y: 0 },
+			},
+		]);
+		expect(session.selectedIds.has("sj1")).toBe(true);
+	});
+
+	test("Snap-Join second click on the target aborts", () => {
+		const bodies = [box("target", 0, 0, 10, 5)];
+		const { session, log } = makeJointModesSession(bodies);
+		session.setTool("joint");
+		session.snapJoin = true;
+		session.pointerDown(0, 0);
+		session.pointerDown(2, 0);
+		expect(log).toEqual([
+			["cancel", null],
+			["begin", null],
+			["cancel", null],
 		]);
 	});
 });

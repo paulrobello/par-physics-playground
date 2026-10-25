@@ -455,6 +455,21 @@ export function createRenderer(
 					ctx.fill();
 				}
 				ctx.restore();
+				// Hover center helper (Paul, 2026-10-25): the point every joint
+				// placement and snap infers — crosshair + ring at the body
+				// center, world axis, screen-constant size. Drawn after restore
+				// so it never rotates with the body.
+				ctx.save();
+				ctx.strokeStyle = ACCENT_COLOR;
+				ctx.lineWidth = 1 / zoom;
+				ctx.beginPath();
+				ctx.arc(x, y, 4 / zoom, 0, Math.PI * 2);
+				ctx.moveTo(x - 7 / zoom, y);
+				ctx.lineTo(x + 7 / zoom, y);
+				ctx.moveTo(x, y - 7 / zoom);
+				ctx.lineTo(x, y + 7 / zoom);
+				ctx.stroke();
+				ctx.restore();
 				return;
 			}
 			let sprite = bodySprites.get(id);

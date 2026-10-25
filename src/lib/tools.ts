@@ -421,6 +421,24 @@ export function pickBody(
 }
 
 /**
+ * ALL bodies containing the point, TOPMOST FIRST (pickBody's order): the
+ * joint tool's Shift+click ties the whole stack (Paul, 2026-10-25).
+ */
+export function pickAllBodies(
+	bodies: readonly PickableBody[],
+	wx: number,
+	wy: number,
+): string[] {
+	const hits: string[] = [];
+	for (let i = bodies.length - 1; i >= 0; i--) {
+		const b = bodies[i];
+		if (!b) continue;
+		if (pickBody([b], wx, wy) !== undefined) hits.push(b.id);
+	}
+	return hits;
+}
+
+/**
  * The `depth`-th body containing the point, TOPMOST FIRST: 0 is the
  * topmost (pickBody's answer), 1 is the body one beneath it — the Alt+click
  * pick for reaching a body hidden behind another (Paul, 2026-10-25). Depth
@@ -432,12 +450,7 @@ export function pickBodyAtDepth(
 	wy: number,
 	depth: number,
 ): string | undefined {
-	const hits: string[] = [];
-	for (let i = bodies.length - 1; i >= 0; i--) {
-		const b = bodies[i];
-		if (!b) continue;
-		if (pickBody([b], wx, wy) !== undefined) hits.push(b.id);
-	}
+	const hits = pickAllBodies(bodies, wx, wy);
 	if (hits.length === 0) return undefined;
 	const d = Math.max(0, Math.min(Math.floor(depth), hits.length - 1));
 	return hits[d];
@@ -729,6 +742,36 @@ export interface ToolSessionEvents {
 		readonly moverId: string;
 		readonly targetId: string;
 	}): void;
+	/**
+	 * Joint tool's Shift+click: ties EVERY body under the click together —
+	 * consecutive pairs of `ids` (topmost first) get `jointKind` joints, all
+	 * anchored at the click point, one undo action for the whole chain.
+	 * Returns the placed count (0 = refused).
+	 */
+	onPlaceJointChain?(spec: {
+		readonly ids: readonly string[];
+		readonly jointKind: PlaceableJointKind;
+		readonly x: number;
+		readonly y: number;
+	}): number;
+	/**
+	 * Snap-Join mode's completion: teleport `moverId` so its center lands on
+	 * `targetId`'s center, then place `jointKind` with both anchors at that
+	 * shared center — move + joint as ONE undo action. Returns the joint id
+	 * or undefined when refused.
+	 */
+	onPlaceSnapJoint?(spec: {
+		readonly targetId: string;
+		readonly moverId: string;
+		readonly jointKind: PlaceableJointKind;
+		readonly targetPoint: Vec2;
+		readonly moverPoint: Vec2;
+	}): string | undefined;
+	/**
+	 * Joint tool's Shift+click support: ALL bodies under the point, topmost
+	 * first (see {@link pickAllBodies}).
+	 */
+	pickAllBodies?(wx: number, wy: number): string[];
 }
 
 type Phase =
@@ -893,6 +936,16 @@ export class ToolSession {
 	 * from it via {@link makePlacedJoint}. Default pin (the T1 behavior).
 	 */
 	jointKind: PlaceableJointKind = "pin";
+
+	/**
+	 * Snap-Join mode (Paul, 2026-10-25): the joint tool's FIRST click IS the
+	 * target location; the second click's body teleports so its clicked
+	 * point lands on it, and the joint applies at that shared point. Center
+	 * clicks make this center-to-center (the requested example). Move +
+	 * joint = one undo action. Rope and pulley kinds ignore the mode
+	 * (stroke / third-click flows).
+	 */
+	snapJoin = false;
 
 	/**
 	 * Set the placement kind from the tool rail. Changing kind mid-gesture
@@ -1284,7 +1337,43 @@ export class ToolSession {
 				return;
 			}
 			this.phase = { kind: "idle" };
-			const hitId = this.pick(wx, wy);
+			// Snap-Join mode: the second body TELEPORTS so its clicked point
+			// lands on the first click's point (center clicks = the doc
+			// example), then the joint applies at that shared point — move +
+			// joint as one undo action (Paul, 2026-10-25).
+			const snapTarget = this.pick(wx, wy);
+			if (this.snapJoin && snapTarget) {
+				if (snapTarget === bodyAId) {
+					this.events.onCancelAction?.();
+					return;
+				}
+				const jointId = this.events.onPlaceSnapJoint?.({
+					targetId: bodyAId,
+					moverId: snapTarget,
+					jointKind: this.jointKind,
+					targetPoint: { x: anchorX, y: anchorY },
+					moverPoint: { x: wx, y: wy },
+				});
+				if (jointId) this.selectedIds = new Set([jointId]);
+				return;
+			}
+			// Shift+click ties bodyA plus every body under the click — chain
+			// of joints at the click point, one undo action.
+			if (mods.shift === true && this.jointKind !== "rope") {
+				const stack = this.events.pickAllBodies?.(wx, wy) ?? [];
+				if (stack.length > 0) {
+					this.events.onPlaceJointChain?.({
+						ids: [bodyAId, ...stack.filter((id) => id !== bodyAId)],
+						jointKind: this.jointKind,
+						x: wx,
+						y: wy,
+					});
+					return;
+				}
+				this.events.onCancelAction?.();
+				return;
+			}
+			const hitId = snapTarget;
 			if (hitId === bodyAId) {
 				// Self-joint abort (see the pulley comment): drop the snapshot.
 				this.events.onCancelAction?.();
@@ -1388,6 +1477,21 @@ export class ToolSession {
 				stroke.add(wx, wy);
 				this.phase = { kind: "rope-draw", stroke };
 				return;
+			}
+			// Shift+click ties the WHOLE stack under the click immediately —
+			// consecutive pairs get the joint at the click point (Paul,
+			// 2026-10-25). One or zero bodies falls through to the normal arm.
+			if (mods.shift === true && this.jointKind !== "pulley") {
+				const stack = this.events.pickAllBodies?.(wx, wy) ?? [];
+				if (stack.length >= 2) {
+					this.events.onPlaceJointChain?.({
+						ids: stack,
+						jointKind: this.jointKind,
+						x: wx,
+						y: wy,
+					});
+					return;
+				}
 			}
 			const hitId = this.pick(wx, wy);
 			if (!hitId) {

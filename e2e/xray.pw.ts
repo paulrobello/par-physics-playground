@@ -38,10 +38,26 @@ test("x-ray makes covered shapes visible; the toggle persists across reload", as
 			return { r: d[0]!, g: d[1]!, b: d[2]! };
 		});
 
+	// Wait for a PAINTED frame containing the boxes before the baseline —
+	// sampling pre-paint makes the ghost sample (alpha-blended ink over
+	// background) nearly identical to a never-painted baseline.
+	await page.evaluate(
+		() =>
+			new Promise<void>((resolve) => {
+				requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+			}),
+	);
 	const solid = await sample();
 	await page.locator('[data-draw="x-ray"]').click();
-	// Let one frame render in x-ray mode.
-	await page.waitForTimeout(120);
+	// Wait for a PAINTED frame in x-ray mode — a fixed sleep races a
+	// load-starved rAF and samples the pre-toggle buffer (3 flakes at host
+	// load ≥ 15).
+	await page.evaluate(
+		() =>
+			new Promise<void>((resolve) => {
+				requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+			}),
+	);
 	const ghost = await sample();
 
 	// The covered point's color changed: the underlying wood box bleeds
@@ -54,6 +70,12 @@ test("x-ray makes covered shapes visible; the toggle persists across reload", as
 	// The toggle persists (settings store) and restores the mode.
 	await page.reload();
 	await page.waitForFunction(() => window.__ppg !== undefined);
+	await page.evaluate(
+		() =>
+			new Promise<void>((resolve) => {
+				requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+			}),
+	);
 	await expect.soft(page.locator('[data-draw="x-ray"]')).toBeChecked();
 	const restored = await sample();
 	expect(Math.abs(restored.r - solid.r)).toBeGreaterThan(12);

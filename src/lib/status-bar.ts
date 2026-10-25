@@ -85,12 +85,27 @@ export function attachStatusBar(deps: StatusBarDeps): StatusBar {
 	const prev = { ...counts };
 
 	const frame = (dt: number): void => {
-		// Tool help: joint tool narrows to the active placement kind.
+		// Tool help: joint tool narrows to the active placement kind; the
+		// shared modifier hints ride along (Shift ties the stack; the Snap-Join
+		// toggle redirects the second click).
 		const tool = deps.session.tool;
-		const help =
-			tool === "joint"
-				? (JOINT_HELP[deps.session.jointKind] ?? JOINT_HELP.pin ?? "")
-				: (TOOL_HELP[tool] ?? "");
+		const jointHelp = tool === "joint";
+		const base = jointHelp
+			? (JOINT_HELP[deps.session.jointKind] ?? JOINT_HELP.pin ?? "")
+			: (TOOL_HELP[tool] ?? "");
+		// Shift chains and Snap-Join apply to the two-click kinds only —
+		// rope is a stroke and pulley has its own third-click flow — so the
+		// hints stay honest about what the active kind does.
+		const modesOk = jointHelp
+			? deps.session.jointKind !== "rope" && deps.session.jointKind !== "pulley"
+			: false;
+		const help = jointHelp
+			? `${base}${modesOk ? " · Shift+click ties every stacked body" : ""}${
+					modesOk && deps.session.snapJoin
+						? " · SNAP-JOIN: 1st click target, 2nd body snaps to it"
+						: ""
+				}`
+			: base;
 		if (help !== lastHelp) {
 			helpEl.textContent = help;
 			lastHelp = help;

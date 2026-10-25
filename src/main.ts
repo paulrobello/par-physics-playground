@@ -49,6 +49,7 @@ import { attachStatusBar, type StatusBar } from "./lib/status-bar";
 import {
 	bodiesInRect,
 	type PickableBody,
+	pickAllBodies,
 	pickBody,
 	pickBodyAtDepth,
 	pickJoint,
@@ -497,6 +498,8 @@ void (async () => {
 	// action for the whole gesture (arming press opened the snapshot).
 	events.pickBodyOnly = (wx, wy, depth = 0) =>
 		pickBodyAtDepth(listPickableBodies(), wx, wy, depth);
+	events.pickAllBodies = (wx, wy) =>
+		pickAllBodies(listPickableBodies(), wx, wy);
 	events.bodyCenter = (id) => {
 		const b = w.bodies.get(id);
 		return b ? { x: b.translation().x, y: b.translation().y } : undefined;
