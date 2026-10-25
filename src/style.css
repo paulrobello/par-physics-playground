@@ -53,6 +53,10 @@ body {
 	line-height: 1.5;
 	color: var(--hud-text);
 	background: var(--canvas-bg);
+	/* The app grid fills the viewport exactly; page-level scrollbars only
+	   appear when inner content overflows (the header) — scrolling belongs
+	   to the header itself, never the page. */
+	overflow: hidden;
 }
 
 /* Browser surfaces the design forgets (craft floor): selection, caret,
@@ -92,10 +96,33 @@ output {
 	grid-area: top-bar;
 	display: flex;
 	align-items: center;
+	/* Narrower than the controls: the header scrolls its overflow
+	   horizontally — the page never scrolls (Paul, 2026-10-24). */
+	overflow-x: auto;
+	overflow-y: hidden;
 	padding: 0 12px;
 	margin: 0;
 	background: var(--panel-bg);
 	border-bottom: 1px solid var(--panel-border);
+}
+
+/* Header scrollbar themed in the instrument palette (the panel pattern). */
+#top-bar::-webkit-scrollbar {
+	height: 8px;
+}
+
+#top-bar::-webkit-scrollbar-thumb {
+	background: var(--panel-border);
+	border-radius: 4px;
+	border: 2px solid var(--panel-bg);
+}
+
+#top-bar::-webkit-scrollbar-thumb:hover {
+	background: var(--border-strong);
+}
+
+#top-bar::-webkit-scrollbar-track {
+	background: transparent;
 }
 
 #top-bar h1 {
