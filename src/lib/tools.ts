@@ -13,6 +13,7 @@ import {
 	FreehandStrokeBuilder,
 } from "./freehand";
 import { jointPickRadius, type PlaceableJointKind } from "./joint";
+import { THRUSTER_AIM_MIN_DRAG } from "./thruster";
 import { pointInPolygon, type Vec2 } from "./triangulate";
 
 export type ToolId =
@@ -266,7 +267,9 @@ export type DrawPreview =
 			 * from→wheel→to instead of the single attach line.
 			 */
 			wheel?: Vec2;
-	  };
+	  }
+	/** Thruster drag-to-aim: the mount arrow pivots toward the cursor. */
+	| { kind: "thruster-aim"; x: number; y: number; angle: number };
 
 /** Beam centered on the segment midpoint, oriented along it, min length clamped. */
 export function beamFromSegment(
@@ -555,6 +558,18 @@ export interface ToolSessionEvents {
 		readonly y: number;
 	}): string | undefined;
 	/**
+	 * The thruster-aim drag ended: `worldAngle` is the drag direction in
+	 * world radians when the drag covered THRUSTER_AIM_MIN_DRAG, or null for
+	 * a below-minimum drag / Escape / tool-switch (the thruster keeps its
+	 * current angle and the placement's undo snapshot records the mount).
+	 * The events layer converts to body-local and records the undo action —
+	 * mount + aim land as ONE undo step.
+	 */
+	onThrusterAim?(spec: {
+		readonly id: string;
+		readonly worldAngle: number | null;
+	}): void;
+	/**
 	 * Glyph toggle affordance (P4-T3 motor, P4-T5 thruster): a plain
 	 * select-tool press landed on the picked entity `id` (no shift, no rotate
 	 * modifier). Return true when the press was CONSUMED as a glyph toggle —
@@ -639,6 +654,23 @@ type Phase =
 			readonly anchorY: number;
 			curX: number;
 			curY: number;
+	  }
+	| {
+			/**
+			 * Thruster drag-to-aim: the press already mounted the thruster
+			 * (angle 0); dragging sets the thrust direction — the preview
+			 * tracks the cursor and release converts the WORLD drag angle to
+			 * the body-local stored angle via {@link aimAngleLocal}. A drag
+			 * below THRUSTER_AIM_MIN_DRAG commits null (keeps 0).
+			 */
+			readonly kind: "thruster-aim";
+			readonly id: string;
+			/** Mount point (world). */
+			readonly anchorX: number;
+			readonly anchorY: number;
+			/** Current drag point (world). */
+			aimX: number;
+			aimY: number;
 	  }
 	| {
 			/**
@@ -798,6 +830,17 @@ export class ToolSession {
 				wheel: { x: this.phase.curX, y: this.phase.curY },
 			};
 		}
+		if (this.phase.kind === "thruster-aim") {
+			const dx = this.phase.aimX - this.phase.anchorX;
+			const dy = this.phase.aimY - this.phase.anchorY;
+			if (Math.hypot(dx, dy) < 2) return null;
+			return {
+				kind: "thruster-aim",
+				x: this.phase.anchorX,
+				y: this.phase.anchorY,
+				angle: Math.atan2(dy, dx),
+			};
+		}
 		if (this.phase.kind === "rope-draw") {
 			return { kind: "stroke", points: this.phase.stroke.points };
 		}
@@ -849,6 +892,15 @@ export class ToolSession {
 		if (this.phase.kind === "dragging") this.events.onDragEnd();
 		if (this.phase.kind === "rotating") this.events.onRotateEnd();
 		if (this.phase.kind === "text-editing") this.commitText();
+		if (this.phase.kind === "thruster-aim") {
+			// The mount is KEPT: commit the aim as-is (null keeps the placed
+			// angle) inside the same undo step, never a snapshot drop — the
+			// thruster already exists in the world.
+			this.events.onThrusterAim?.({ id: this.phase.id, worldAngle: null });
+			this.phase = { kind: "idle" };
+			this.tool = tool;
+			return;
+		}
 		this.events.onCancelAction?.();
 		this.phase = { kind: "idle" };
 		this.tool = tool;
@@ -863,6 +915,12 @@ export class ToolSession {
 		if (this.phase.kind === "dragging") this.events.onDragEnd();
 		if (this.phase.kind === "rotating") this.events.onRotateEnd();
 		if (this.phase.kind === "text-editing") this.commitText();
+		if (this.phase.kind === "thruster-aim") {
+			// Mount kept, aim committed as-is (see setTool) — no snapshot drop.
+			this.events.onThrusterAim?.({ id: this.phase.id, worldAngle: null });
+			this.phase = { kind: "idle" };
+			return;
+		}
 		this.events.onCancelAction?.();
 		const wasGesture = this.phase.kind !== "idle";
 		this.phase = { kind: "idle" };
@@ -1065,8 +1123,11 @@ export class ToolSession {
 			return;
 		}
 		if (this.tool === "thruster") {
-			// Single click on a body mounts a thruster at the click point
-			// (empty space refuses — nothing to push against).
+			// Press mounts the thruster at the click point (empty space refuses
+			// — nothing to push against), then the DRAG aims it: the phase
+			// tracks the cursor and pointerUp converts the drag to the
+			// body-local angle. The undo action recorded by the events layer
+			// at aim time covers mount + aim as one step.
 			const hitId = this.pick(wx, wy);
 			if (!hitId) {
 				this.events.onCancelAction?.();
@@ -1077,7 +1138,16 @@ export class ToolSession {
 				x: wx,
 				y: wy,
 			});
-			if (thrusterId) this.selectedIds = new Set([thrusterId]);
+			if (!thrusterId) return;
+			this.selectedIds = new Set([thrusterId]);
+			this.phase = {
+				kind: "thruster-aim",
+				id: thrusterId,
+				anchorX: wx,
+				anchorY: wy,
+				aimX: wx,
+				aimY: wy,
+			};
 			return;
 		}
 		if (this.tool === "line") {
@@ -1206,6 +1276,10 @@ export class ToolSession {
 			this.phase = { ...this.phase, curX: wx, curY: wy };
 			return;
 		}
+		if (this.phase.kind === "thruster-aim") {
+			this.phase = { ...this.phase, aimX: wx, aimY: wy };
+			return;
+		}
 		if (
 			this.phase.kind === "joint-arming" ||
 			this.phase.kind === "joint-wheel"
@@ -1249,6 +1323,20 @@ export class ToolSession {
 	}
 
 	pointerUp(): void {
+		if (this.phase.kind === "thruster-aim") {
+			const { id, anchorX, anchorY, aimX, aimY } = this.phase;
+			this.phase = { kind: "idle" };
+			const dx = aimX - anchorX;
+			const dy = aimY - anchorY;
+			this.events.onThrusterAim?.({
+				id,
+				worldAngle:
+					Math.hypot(dx, dy) >= THRUSTER_AIM_MIN_DRAG
+						? Math.atan2(dy, dx)
+						: null,
+			});
+			return;
+		}
 		if (this.phase.kind === "rope-draw") {
 			const points = this.phase.stroke.points;
 			this.phase = { kind: "idle" };

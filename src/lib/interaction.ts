@@ -33,7 +33,11 @@ import {
 	ROPE_SEGMENT_SPACING,
 	syncRopeSegmentCounter,
 } from "./rope";
-import { THRUSTER_DEFAULT_STRENGTH, type ThrusterEntity } from "./thruster";
+import {
+	aimAngleLocal,
+	THRUSTER_DEFAULT_STRENGTH,
+	type ThrusterEntity,
+} from "./thruster";
 import {
 	BEAM_HALF_WIDTH,
 	beamFromSegment,
@@ -733,8 +737,31 @@ export function createToolEvents(
 				deps?.cancelAction?.();
 				return undefined;
 			}
-			recordAction();
+			// NO recordAction here: the aim drag completes the gesture, and the
+			// mount + aim land as ONE undo step (recorded by onThrusterAim).
 			return entity.id;
+		},
+		onThrusterAim(spec) {
+			// Mount + aim as ONE undo step. Null (tiny drag / Escape / tool
+			// switch) keeps the placed angle and still records the mount.
+			const t = world.doc.get(spec.id);
+			if (t?.kind !== "thruster") {
+				// Gone mid-drag (sim event): drop the dangling mount snapshot.
+				deps?.cancelAction?.();
+				return;
+			}
+			if (spec.worldAngle !== null) {
+				const body = world.bodies.get(t.bodyId);
+				if (body) {
+					// World drag angle → body-local stored angle (the panel's
+					// Angle field reads the same convention).
+					const w = spec.worldAngle;
+					world.updateThruster(spec.id, {
+						angle: aimAngleLocal(Math.cos(w), Math.sin(w), body.rotation()),
+					});
+				}
+			}
+			recordAction();
 		},
 		onSpawnRope(spec) {
 			// Rope stroke commit (P4-T4). The session's pointer-down already

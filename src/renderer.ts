@@ -586,24 +586,89 @@ export function createRenderer(
 		const selected = scene.selectedIds();
 		const r = jointGlyphRadius(zoom);
 		ctx.lineWidth = 1.5 / zoom;
+		const now = performance.now();
 		scene.forEachThruster((id, wx, wy, angle, on) => {
 			const isSel = selected.has(id);
 			// Same PRD R2 rule as joints: glow on selection only.
 			ctx.shadowColor = isSel ? HOVER_GLOW : "transparent";
 			ctx.shadowBlur = isSel ? HOVER_GLOW_BLUR_PX : 0;
 			const color = on ? ACCENT_COLOR : JOINT_OFF_COLOR;
-			ctx.strokeStyle = color;
-			ctx.fillStyle = color;
 			const ux = Math.cos(angle);
 			const uy = Math.sin(angle);
+			// Exhaust plume (thrusting only): three tapering flat-fill layers
+			// shooting OPPOSITE the thrust direction from just behind the
+			// mount. Flat fills only (PRD R2 — no per-frame shadow state);
+			// the flicker is two cheap sines keyed by the id hash so multiple
+			// thrusters never pulse in sync.
+			if (on) {
+				let hash = 0;
+				for (let i = 0; i < id.length; i++) {
+					hash = (hash * 31 + id.charCodeAt(i)) | 0;
+				}
+				const t = now / 1000;
+				const flicker =
+					1 +
+					0.13 * Math.sin(t * 21 + hash) +
+					0.09 * Math.sin(t * 47 + hash * 2.7);
+				const fx = wx - ux * r * 1.6;
+				const fy = wy - uy * r * 1.6;
+				const px = -uy;
+				const py = ux;
+				const layers: Array<[number, number, string]> = [
+					[26, 5.2, "rgba(255, 138, 66, 0.55)"],
+					[17, 3.6, "rgba(255, 179, 71, 0.75)"],
+					[9, 2.2, "rgba(255, 224, 130, 0.9)"],
+				];
+				for (const [len, half, fill] of layers) {
+					const L = len / zoom;
+					const H = (half * flicker) / zoom;
+					ctx.fillStyle = fill;
+					ctx.beginPath();
+					ctx.moveTo(fx, fy);
+					ctx.lineTo(fx - ux * L + px * H, fy - uy * L + py * H);
+					ctx.lineTo(fx - ux * L * 1.25, fy - uy * L * 1.25);
+					ctx.lineTo(fx - ux * L - px * H, fy - uy * L - py * H);
+					ctx.closePath();
+					ctx.fill();
+				}
+			}
+			// Dark casing under the glyph so the accent reads on any body fill
+			// (the on-body contrast report): a wider stage-void stroke behind
+			// the shaft and an outlined head triangle.
+			const casing = "rgba(17, 20, 24, 0.85)";
+			ctx.strokeStyle = casing;
+			ctx.lineWidth = 4.4 / zoom;
+			ctx.beginPath();
+			ctx.moveTo(wx - ux * r * 2.6, wy - uy * r * 2.6);
+			ctx.lineTo(wx + ux * r * 1.0, wy + uy * r * 1.0);
+			ctx.stroke();
+			ctx.strokeStyle = color;
+			ctx.fillStyle = color;
 			ctx.save();
-			if (selected.has(id)) ctx.lineWidth = 2 / zoom;
-			// Shaft from behind the anchor through it, head at the tip.
+			if (isSel) ctx.lineWidth = 2 / zoom;
+			ctx.lineWidth = (isSel ? 2 : 1.5) / zoom;
+			// Shaft from behind the anchor through it, head at the tip. The
+			// head draws a filled casing triangle first (same contrast fix).
 			ctx.beginPath();
 			ctx.moveTo(wx - ux * r * 2.4, wy - uy * r * 2.4);
 			ctx.lineTo(wx + ux * r * 0.8, wy + uy * r * 0.8);
 			ctx.stroke();
+			ctx.strokeStyle = casing;
+			ctx.fillStyle = casing;
 			ctx.beginPath();
+			ctx.moveTo(wx + ux * r * 2.45, wy + uy * r * 2.45);
+			ctx.lineTo(
+				wx + ux * r * 0.45 - uy * r * 1.3,
+				wy + uy * r * 0.45 + ux * r * 1.3,
+			);
+			ctx.lineTo(
+				wx + ux * r * 0.45 + uy * r * 1.3,
+				wy + uy * r * 0.45 - ux * r * 1.3,
+			);
+			ctx.closePath();
+			ctx.fill();
+			ctx.strokeStyle = color;
+			ctx.fillStyle = color;
 			ctx.moveTo(wx + ux * r * 2.2, wy + uy * r * 2.2);
 			ctx.lineTo(
 				wx + ux * r * 0.6 - uy * r * 1.1,
@@ -825,6 +890,38 @@ export function createRenderer(
 			ctx.setLineDash([]);
 			ctx.beginPath();
 			ctx.arc(p.from.x, p.from.y, jointGlyphRadius(zoom), 0, Math.PI * 2);
+			ctx.stroke();
+			ctx.restore();
+			return;
+		} else if (p.kind === "thruster-aim") {
+			// Drag-to-aim preview: a dashed accent ray from the mount toward
+			// the cursor with an open arrowhead — the thrust direction the
+			// release will store.
+			ctx.save();
+			ctx.shadowColor = "transparent";
+			ctx.shadowBlur = 0;
+			const ux = Math.cos(p.angle);
+			const uy = Math.sin(p.angle);
+			const px = -uy;
+			const py = ux;
+			const ray = 90 / zoom;
+			ctx.setLineDash([5 / zoom, 3 / zoom]);
+			ctx.beginPath();
+			ctx.moveTo(p.x, p.y);
+			ctx.lineTo(p.x + ux * ray, p.y + uy * ray);
+			ctx.stroke();
+			ctx.setLineDash([]);
+			ctx.beginPath();
+			ctx.moveTo(p.x + ux * ray, p.y + uy * ray);
+			ctx.lineTo(
+				p.x + ux * ray * 0.82 - (px * 6) / zoom,
+				p.y + uy * ray * 0.82 + (py * 6) / zoom,
+			);
+			ctx.lineTo(
+				p.x + ux * ray * 0.82 + (px * 6) / zoom,
+				p.y + uy * ray * 0.82 - (py * 6) / zoom,
+			);
+			ctx.closePath();
 			ctx.stroke();
 			ctx.restore();
 			return;

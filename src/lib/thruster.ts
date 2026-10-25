@@ -62,3 +62,21 @@ export function thrusterWorldPose(
 
 /** Human-readable label (panel). */
 export const THRUSTER_TYPE_LABEL = "Thruster";
+
+/**
+ * Drag-to-aim conversion (placement): a drag vector's WORLD angle becomes
+ * the thruster's BODY-LOCAL angle by subtracting the mounted body's
+ * placement rotation, wrapped into (−π, π]. A thruster placed by dragging
+ * toward world-up on a rotated body keeps aiming world-up as the body
+ * spins — the same convention as the panel's Angle field.
+ */
+export function aimAngleLocal(dx: number, dy: number, bodyRot: number): number {
+	const world = Math.atan2(dy, dx);
+	let local = world - bodyRot;
+	while (local > Math.PI) local -= Math.PI * 2;
+	while (local <= -Math.PI) local += Math.PI * 2;
+	return local;
+}
+
+/** Minimum drag (world units) below which placement keeps angle 0. */
+export const THRUSTER_AIM_MIN_DRAG = 4;
