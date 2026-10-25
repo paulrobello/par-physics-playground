@@ -187,6 +187,8 @@ const sceneView = {
 			rot: number,
 			isStatic: boolean,
 			color: string,
+			/** Runtime fire state (flammable.ts): true draws the flame glyph. */
+			burning: boolean,
 		) => void,
 	): void {
 		const w = world;
@@ -202,6 +204,7 @@ const sceneView = {
 				body.rotation(),
 				entity.isStatic,
 				w.doc.material(entity.materialId).color,
+				w.isBurning(id),
 			);
 		}
 	},

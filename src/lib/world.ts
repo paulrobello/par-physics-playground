@@ -24,6 +24,7 @@ import {
 	type Material,
 	SceneDocument,
 } from "./document";
+import { EXHAUST_IGNITION_REACH, isBurnedOut } from "./flammable";
 import { solveGearImpulse, wrapAngleDelta } from "./gears";
 import {
 	type JointEntity,
@@ -139,6 +140,15 @@ export class PhysicsWorld {
 	private readonly contactEvents = new RAPIER.EventQueue(false);
 	/** Armed (brittle) collider handles → owning body id (impact lookup). */
 	private readonly brittleColliders = new Map<number, DocumentId>();
+	/**
+	 * Flammable collider handles → owning body id: the exhaust-ray hit lookup
+	 * and the contact-spread pairing (see flammable.ts). Map-only arming —
+	 * contact-force events arm at IGNITION (ignite), so steady-state
+	 * flammable scenes generate no per-tick event traffic.
+	 */
+	private readonly flammableColliders = new Map<number, DocumentId>();
+	/** Accumulated burn seconds per burning body id (runtime fire state). */
+	private readonly burning = new Map<DocumentId, number>();
 	/** Elapsed thrusting burn time per thruster id (duration accounting). */
 	private readonly thrusterBurn = new Map<DocumentId, number>();
 	private readonly gearPhases = new Map<
@@ -254,7 +264,12 @@ export class PhysicsWorld {
 		// all come from the document registry (ink fallback for unknown ids).
 		const material = this.doc.material(entity.materialId);
 		this.attachShape(body, entity.shape, material);
-		this.armColliders(entity.id, body, material.brittle === true);
+		this.armColliders(
+			entity.id,
+			body,
+			material.brittle === true,
+			material.flammable === true,
+		);
 		this.doc.add(entity);
 		this.bodies.set(entity.id, body);
 		return body;
@@ -372,6 +387,15 @@ export class PhysicsWorld {
 		if (!t || t.kind !== "thruster" || !t.on) return false;
 		if (t.duration === undefined) return true;
 		return (this.thrusterBurn.get(id) ?? 0) < t.duration;
+	}
+
+	/**
+	 * Whether a body is currently burning — runtime fire state, never part
+	 * of the document (flammable.ts). The renderer's flame glyph reads this
+	 * through the scene adapter; the debug API exposes it to the e2e.
+	 */
+	isBurning(id: DocumentId): boolean {
+		return this.burning.has(id);
 	}
 
 	/**
@@ -899,6 +923,7 @@ export class PhysicsWorld {
 		this.doc.setBodyMaterial(id, materialId);
 		const material = this.doc.material(materialId);
 		const armed = material.brittle === true;
+		const flammable = material.flammable === true;
 		for (let i = 0; i < body.numColliders(); i++) {
 			const collider = body.collider(i);
 			collider.setDensity(material.density);
@@ -910,7 +935,10 @@ export class PhysicsWorld {
 					: RAPIER.ActiveEvents.NONE,
 			);
 		}
-		this.armColliders(id, body, armed);
+		this.armColliders(id, body, armed, flammable);
+		// The fire is runtime state keyed to the material: repainting a burning
+		// body to a non-flammable material extinguishes it (flammable.ts).
+		if (!flammable) this.burning.delete(id);
 		body.recomputeMassPropertiesFromColliders();
 		return true;
 	}
@@ -969,6 +997,8 @@ export class PhysicsWorld {
 			this.thrusterBurn.delete(thruster.id);
 			this.onRemove?.(thruster.id);
 		}
+		// Fire state dies with the body (runtime-only; see flammable.ts).
+		this.burning.delete(id);
 		const body = this.bodies.get(id);
 		if (body) {
 			this.disarmColliders(body);
@@ -1120,21 +1150,25 @@ export class PhysicsWorld {
 	}
 
 	/**
-	 * Track (or drop) a body's collider handles in the brittle-impact lookup.
-	 * Only brittle-armed colliders are tracked, so worlds without brittle
-	 * bodies skip the per-tick drain path entirely (no allocation on the hot
-	 * path).
+	 * Track (or drop) a body's collider handles in the brittle-impact and
+	 * flammable-heat lookups. Only armed colliders are tracked, so worlds
+	 * without brittle or flammable bodies skip both per-tick paths entirely
+	 * (no allocation on the hot path). Flammable arming is map-only: the
+	 * contact-force events arm at ignition — see {@link ignite}.
 	 */
 	private armColliders(
 		id: DocumentId,
 		body: RAPIER.RigidBody,
-		armed: boolean,
+		brittle: boolean,
+		flammable: boolean,
 	): void {
 		for (let i = 0; i < body.numColliders(); i++) {
 			const collider = body.collider(i);
 			if (!collider) continue;
-			if (armed) this.brittleColliders.set(collider.handle, id);
+			if (brittle) this.brittleColliders.set(collider.handle, id);
 			else this.brittleColliders.delete(collider.handle);
+			if (flammable) this.flammableColliders.set(collider.handle, id);
+			else this.flammableColliders.delete(collider.handle);
 		}
 	}
 
@@ -1142,21 +1176,27 @@ export class PhysicsWorld {
 	private disarmColliders(body: RAPIER.RigidBody): void {
 		for (let i = 0; i < body.numColliders(); i++) {
 			const collider = body.collider(i);
-			if (collider) this.brittleColliders.delete(collider.handle);
+			if (collider) {
+				this.brittleColliders.delete(collider.handle);
+				this.flammableColliders.delete(collider.handle);
+			}
 		}
 	}
 
 	/**
-	 * Brittle shatter (see brittle.ts): drain the tick's contact-force events
-	 * and replace every qualifying dynamic brittle body with same-material
-	 * fragments. Candidates are collected across all events first (one body
-	 * hit through several manifolds shatters once), and mutations happen only
-	 * after the drain — the callback runs inside the Rapier event iteration.
+	 * Brittle shatter (see brittle.ts) plus fire spread (see flammable.ts):
+	 * drain the tick's contact-force events and (a) collect every qualifying
+	 * dynamic brittle body for shatter, (b) ignite flammable bodies touched
+	 * by burning ones. Candidates are collected across all events first (one
+	 * body hit through several manifolds shatters/ignites once), and
+	 * mutations happen only after the drain — the callback runs inside the
+	 * Rapier event iteration.
 	 */
 	private processBrittleImpacts(): void {
 		const gravity =
 			Math.abs(this.world.gravity.x) + Math.abs(this.world.gravity.y);
 		const shattered = new Set<DocumentId>();
+		const ignited = new Set<DocumentId>();
 		this.contactEvents.drainContactForceEvents((event) => {
 			const force = event.totalForceMagnitude();
 			for (const handle of [event.collider1(), event.collider2()]) {
@@ -1178,8 +1218,99 @@ export class PhysicsWorld {
 					shattered.add(id);
 				}
 			}
+			// Fire spread (flammable.ts): the event fires because a burning
+			// body's colliders arm CONTACT_FORCE_EVENTS at ignition; when the
+			// paired collider belongs to a not-yet-burning flammable body, it
+			// ignites. Collected and applied after the drain, like shatters.
+			if (this.burning.size > 0) {
+				const a = this.flammableColliders.get(event.collider1());
+				const b = this.flammableColliders.get(event.collider2());
+				if (a !== undefined && b !== undefined) {
+					if (this.burning.has(a) && !this.burning.has(b)) ignited.add(b);
+					else if (this.burning.has(b) && !this.burning.has(a)) ignited.add(a);
+				}
+			}
 		});
 		for (const id of shattered) this.shatterBody(id);
+		for (const id of ignited) this.ignite(id);
+	}
+
+	/**
+	 * Thruster exhaust heat (see flammable.ts): a firing thruster's exhaust
+	 * ray ignites the first flammable body it reaches; any other body the ray
+	 * reaches first blocks the exhaust. Called right after the Rapier tick
+	 * (Rapier's broad-phase fills on step, so earlier casts see an empty
+	 * world) against the live poses the renderer draws this frame. Per-tick
+	 * work touches only active thruster paths (spec perf rule).
+	 */
+	private applyThrusterHeat(): void {
+		for (const thruster of this.doc.thrusters()) {
+			if (!this.thrusterFiring(thruster.id)) continue;
+			const mount = this.bodies.get(thruster.bodyId);
+			const pose = this.thrusterPose(thruster);
+			if (!mount || !pose) continue;
+			// Exhaust = opposite the thrust direction (the renderer plume's
+			// convention). solid=true, mount body excluded — the anchor usually
+			// sits inside its own body.
+			const hit = this.world.castRay(
+				new RAPIER.Ray(
+					{ x: pose.x, y: pose.y },
+					{ x: -Math.cos(pose.angle), y: -Math.sin(pose.angle) },
+				),
+				EXHAUST_IGNITION_REACH,
+				true,
+				undefined,
+				undefined,
+				undefined,
+				mount,
+			);
+			if (!hit) continue;
+			const id = this.flammableColliders.get(hit.collider.handle);
+			if (id !== undefined) this.ignite(id);
+		}
+	}
+
+	/**
+	 * Mark a body burning and arm its colliders for contact-force events so
+	 * the spread drain sees its touches. No-op when already burning. The
+	 * events arm at ignition — not at spawn — so steady-state flammable
+	 * scenes generate no per-tick event traffic (the spec's burning-set-only
+	 * perf rule).
+	 */
+	private ignite(id: DocumentId): void {
+		if (this.burning.has(id)) return;
+		const body = this.bodies.get(id);
+		if (!body) return;
+		this.burning.set(id, 0);
+		for (let i = 0; i < body.numColliders(); i++) {
+			const collider = body.collider(i);
+			if (collider)
+				collider.setActiveEvents(
+					collider.activeEvents() | RAPIER.ActiveEvents.CONTACT_FORCE_EVENTS,
+				);
+		}
+	}
+
+	/**
+	 * Fire bookkeeping (flammable.ts): burning bodies accumulate burn time
+	 * and stay AWAKE (a sleeping fire's contact pairs stop producing the
+	 * spread events the drain needs); a body past BURN_SECONDS is consumed
+	 * through the ordinary removeBody cascade — the brittle removal
+	 * precedent, no undo boundary.
+	 */
+	private applyFireTicks(): void {
+		if (this.burning.size === 0) return;
+		for (const [id, burned] of this.burning) {
+			const body = this.bodies.get(id);
+			if (!body) {
+				this.burning.delete(id);
+				continue;
+			}
+			body.wakeUp();
+			const total = burned + SIM_DT_SECONDS;
+			if (isBurnedOut(total)) this.removeBody(id);
+			else this.burning.set(id, total);
+		}
 	}
 
 	/**
@@ -1331,13 +1462,23 @@ export class PhysicsWorld {
 		b.applyTorqueImpulse(sign * j * rb, true);
 	};
 
-	/** One fixed tick: advance physics, then cull bodies below the kill threshold. */
+	/**
+	 * One fixed tick: physics, then heat and events, then culling. The
+	 * exhaust-heat pass runs right AFTER the Rapier tick — Rapier's
+	 * broad-phase fills on step, so a ray cast before the first step sees an
+	 * empty world — against the same live poses the renderer draws this
+	 * frame. The contact drain (brittle + fire spread) follows, and the burn
+	 * bookkeeping removes consumed bodies.
+	 */
 	step(): void {
 		this.applyThrusters();
 		this.applyPulleyTension();
 		this.doc.eachJoint(this.applyGearTick);
 		this.world.step(this.contactEvents);
-		if (this.brittleColliders.size > 0) this.processBrittleImpacts();
+		this.applyThrusterHeat();
+		if (this.brittleColliders.size > 0 || this.burning.size > 0)
+			this.processBrittleImpacts();
+		this.applyFireTicks();
 		for (const [id, body] of this.bodies) {
 			if (body.translation().y > KILL_THRESHOLD_Y) {
 				this.removeBody(id);

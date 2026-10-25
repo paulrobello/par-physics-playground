@@ -32,6 +32,8 @@ export interface SceneView {
 			isStatic: boolean,
 			/** Resolved material fill color (ink fallback, dynamic bodies only). */
 			color: string,
+			/** Runtime fire state (flammable.ts): true draws the flame glyph. */
+			burning: boolean,
 		) => void,
 	): void;
 	/** Non-physical labels, in document order (drawn above bodies). */
@@ -168,6 +170,18 @@ const SELECTION_PAD_PX = 2;
 /** Draw-preview fill alpha and stroke width (CSS px). */
 const PREVIEW_FILL = "rgba(74, 163, 255, 0.12)";
 const PREVIEW_WIDTH_PX = 1.5;
+
+/**
+ * Burning-body flame glyph layers (flammable.ts): [length px, half-width px,
+ * fill] — the thruster exhaust's three-layer taper at a smaller size, drawn
+ * pointing up against gravity. Module-level so the per-frame body walk
+ * allocates nothing.
+ */
+const FLAME_LAYERS: ReadonlyArray<readonly [number, number, string]> = [
+	[22, 4.6, "rgba(255, 138, 66, 0.5)"],
+	[14, 3.0, "rgba(255, 179, 71, 0.7)"],
+	[8, 1.8, "rgba(255, 224, 130, 0.85)"],
+];
 
 /** Label text color (HUD primary-text token). */
 const LABEL_COLOR = "#e6e9ee";
@@ -439,8 +453,11 @@ export function createRenderer(
 		const selectedIds = scene.selectedIds();
 		const lift = HOVER_LIFT_PX / zoom;
 		const dpr = window.devicePixelRatio;
+		// Flame flicker phase (flammable.ts): SIM clock, like the thruster
+		// plume — pausing time freezes the fire.
+		const t = scene.simTime();
 		seenScratch.clear();
-		scene.forEachBody((id, shape, x, y, rot, isStatic, color) => {
+		scene.forEachBody((id, shape, x, y, rot, isStatic, color, burning) => {
 			const hovered = id === hoverId;
 			seenScratch.add(id);
 			if (hovered) {
@@ -486,6 +503,7 @@ export function createRenderer(
 				ctx.lineTo(x, y + 7 / zoom);
 				ctx.stroke();
 				ctx.restore();
+				if (burning) drawFlameGlyph(id, x, y, zoom, t);
 				return;
 			}
 			let sprite = bodySprites.get(id);
@@ -515,6 +533,7 @@ export function createRenderer(
 				sprite.halfH * 2,
 			);
 			ctx.restore();
+			if (burning) drawFlameGlyph(id, x, y, zoom, t);
 		});
 		// Prune sprites of bodies that left the document (deletes, restores).
 		if (bodySprites.size > seenScratch.size + 64) {
@@ -765,6 +784,42 @@ export function createRenderer(
 		}
 		ctx.lineTo(x2, y2);
 		ctx.stroke();
+	}
+
+	/**
+	 * Burning-body flame glyph (flammable.ts): three tapering plume layers
+	 * pointing up against gravity, drawn with the thruster-exhaust pattern
+	 * (drawThrusters) at a smaller screen-constant size — every length ÷
+	 * zoom. The flicker phase comes from the SIM clock (pausing freezes the
+	 * fire, the plume precedent) keyed by the id hash so multiple fires
+	 * never pulse in sync. Module-level FLAME_LAYERS keeps the per-frame
+	 * body walk allocation-free.
+	 */
+	function drawFlameGlyph(
+		id: string,
+		x: number,
+		y: number,
+		zoom: number,
+		t: number,
+	): void {
+		let hash = 0;
+		for (let i = 0; i < id.length; i++) {
+			hash = (hash * 31 + id.charCodeAt(i)) | 0;
+		}
+		const flicker =
+			1 + 0.13 * Math.sin(t * 21 + hash) + 0.09 * Math.sin(t * 47 + hash * 2.7);
+		for (const [len, half, fill] of FLAME_LAYERS) {
+			const L = len / zoom;
+			const H = (half * flicker) / zoom;
+			ctx.fillStyle = fill;
+			ctx.beginPath();
+			ctx.moveTo(x, y);
+			ctx.lineTo(x - H, y - L);
+			ctx.lineTo(x, y - L * 1.25);
+			ctx.lineTo(x + H, y - L);
+			ctx.closePath();
+			ctx.fill();
+		}
 	}
 
 	/**

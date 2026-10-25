@@ -95,6 +95,10 @@ export function attachMaterialPanel(deps: MaterialPanelDeps): void {
 				<label for="mat-brittle">Brittle</label>
 				<input id="mat-brittle" data-mat-brittle type="checkbox" />
 			</div>
+			<div class="mat-field mat-field-flammable">
+				<label for="mat-flammable">Flammable</label>
+				<input id="mat-flammable" data-mat-flammable type="checkbox" />
+			</div>
 			<p class="mat-error" data-mat-error hidden></p>
 			<div class="mat-editor-actions">
 				<button type="button" class="mat-btn primary" data-mat-save>Create</button>
@@ -120,6 +124,7 @@ export function attachMaterialPanel(deps: MaterialPanelDeps): void {
 	const frictionInput = q<HTMLInputElement>("[data-mat-friction]");
 	const restInput = q<HTMLInputElement>("[data-mat-restitution]");
 	const brittleInput = q<HTMLInputElement>("[data-mat-brittle]");
+	const flammableInput = q<HTMLInputElement>("[data-mat-flammable]");
 	const errorEl = q<HTMLParagraphElement>("[data-mat-error]");
 	const saveBtn = q<HTMLButtonElement>("[data-mat-save]");
 
@@ -231,6 +236,7 @@ export function attachMaterialPanel(deps: MaterialPanelDeps): void {
 		frictionInput.value = String(source?.friction ?? 0.5);
 		restInput.value = String(source?.restitution ?? 0.1);
 		brittleInput.checked = source?.brittle ?? false;
+		flammableInput.checked = source?.flammable ?? false;
 		// Programmatic value sets don't fire input events; sync the readouts.
 		for (const input of [densityInput, frictionInput, restInput])
 			input.dispatchEvent(new Event("input"));
@@ -267,6 +273,7 @@ export function attachMaterialPanel(deps: MaterialPanelDeps): void {
 			friction: values.friction,
 			restitution: values.restitution,
 			...(brittleInput.checked ? { brittle: true } : {}),
+			...(flammableInput.checked ? { flammable: true } : {}),
 		};
 		if (editingId) {
 			// Edit is a library op, not undoable (see header): the registry entry

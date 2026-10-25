@@ -75,6 +75,8 @@ export interface DebugApi {
 	bodyMaterial(id: DocumentId): Material | undefined;
 	/** Mass Rapier derived for a registered body, or undefined. */
 	bodyMass(id: DocumentId): number | undefined;
+	/** Whether a body is currently burning (runtime fire state; flammable.ts). */
+	isBurning(id: DocumentId): boolean;
 	/** All registered materials (palette + customs), registry order. */
 	materials(): Material[];
 	/** The material id new draw-tool spawns take (panel active material). */
@@ -259,6 +261,9 @@ export function installDebugApi(
 		},
 		bodyMass(id) {
 			return world.bodies.get(id)?.mass();
+		},
+		isBurning(id) {
+			return world.isBurning(id);
 		},
 		materials() {
 			return world.doc.allMaterials();

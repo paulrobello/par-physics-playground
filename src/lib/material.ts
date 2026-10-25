@@ -29,6 +29,14 @@ export interface Material {
 	 * false means indestructible.
 	 */
 	readonly brittle?: boolean;
+	/**
+	 * Flammable: a firing thruster's exhaust ignites a body of this material;
+	 * it burns for a fixed duration and is removed from the world, igniting
+	 * flammable bodies it touches while burning (see flammable.ts for the
+	 * ignition, spread, and burn-out rules). Optional; absent or false means
+	 * fire-proof. The fire itself is runtime-only — never serialized.
+	 */
+	readonly flammable?: boolean;
 }
 
 /** The default palette entry; bodies and lookups fall back to it. */
