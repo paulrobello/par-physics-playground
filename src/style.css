@@ -1133,7 +1133,6 @@ input[type="range"]:hover::-moz-range-thumb {
 	color: var(--text);
 	font-size: 12px;
 	line-height: 1.35;
-	white-space: nowrap;
 	box-shadow: var(--shadow-lift-strong);
 	opacity: 0;
 	pointer-events: none;
