@@ -441,6 +441,9 @@ input[type="range"]:hover::-moz-range-thumb {
 	grid-area: stage;
 	position: relative;
 	overflow: hidden;
+	/* Let the 1fr grid row shrink below the canvas's intrinsic size (the
+	 * status-bar row must stay visible at short viewport heights). */
+	min-height: 0;
 }
 
 #stage {
