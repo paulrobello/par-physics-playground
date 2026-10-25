@@ -184,7 +184,7 @@ export function attachMaterialPanel(deps: MaterialPanelDeps): void {
 			main.className = "mat-row-main";
 			main.dataset.matId = m.id;
 			main.setAttribute("aria-pressed", m.id === activeId ? "true" : "false");
-			main.title = `${m.name} — density ${m.density}, friction ${m.friction}, restitution ${m.restitution}`;
+			main.dataset.tip = `${m.name} — density ${m.density}, friction ${m.friction}, restitution ${m.restitution}`;
 			const swatch = document.createElement("span");
 			swatch.className = "mat-swatch";
 			swatch.style.background = m.color;

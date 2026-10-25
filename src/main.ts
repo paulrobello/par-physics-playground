@@ -7,11 +7,11 @@ import { debugEnabled } from "./debug";
 import type { Assembly } from "./lib/assembly";
 import { attachAssemblyPanel } from "./lib/assembly-panel";
 import { createAssemblyStore } from "./lib/assembly-store";
-import { Camera } from "./lib/camera";
+import { Camera, cameraFitForBounds } from "./lib/camera";
 import { attachCameraControls } from "./lib/camera-controls";
 import { SimClock } from "./lib/clock";
 import { installDebugApi } from "./lib/debug-api";
-import { buildDemoScene } from "./lib/demo-scene";
+import { buildDemoScene, demoSceneBounds } from "./lib/demo-scene";
 import { markDemoSceneSeen, shouldLoadDemoScene } from "./lib/first-run";
 import {
 	attachToolControls,
@@ -31,6 +31,7 @@ import {
 import { SceneStore } from "./lib/scene-store";
 import { attachSceneUI } from "./lib/scene-ui";
 import { attachSimControls, TimeScale } from "./lib/sim-controls";
+import { createSimPump } from "./lib/sim-pump";
 import {
 	bodiesInRect,
 	type PickableBody,
@@ -53,6 +54,9 @@ const canvas: HTMLCanvasElement = stage;
 let clock: SimClock | null = null;
 /** Per-frame refresh for the joint panel section (set at panel attach). */
 let refreshJointPanel: (() => void) | null = null;
+/** Demo-boot camera fit: set by the boot branch, applied after ALL panels attach. */
+let demoBooted = false;
+let demoEntitiesForFit: Parameters<typeof fitCameraToScene>[0] | null = null;
 /** Live physics world, built asynchronously at boot. */
 let world: PhysicsWorld | null = null;
 /** Tool state machine; built with the world. */
@@ -244,14 +248,49 @@ const sceneView = {
 
 const camera = new Camera();
 
+/**
+ * Fit the camera so the scene's body-content bounds sit centered in the
+ * viewport (the demo-boot fix: the camera used to stay at the generic
+ * ground-at-bottom default, drawing the machine off to the right). Both
+ * demo-load paths call this; scene/autosave restores keep the camera alone
+ * (a returning session's view is the user's, not ours to move).
+ */
+const fitCameraToScene = (
+	entities: Parameters<typeof demoSceneBounds>[0],
+): void => {
+	const bounds = demoSceneBounds(entities);
+	if (!bounds) return;
+	const rect = canvas.getBoundingClientRect();
+	const fit = cameraFitForBounds(
+		bounds.minX,
+		bounds.minY,
+		bounds.maxX,
+		bounds.maxY,
+		rect.width,
+		rect.height,
+	);
+	camera.zoom = fit.zoom;
+	camera.offsetX = fit.offsetX;
+	camera.offsetY = fit.offsetY;
+};
+
+const simPump = createSimPump(
+	(seconds) => {
+		// Time-scale (P3-T3) scales the pump's FEED only: the fixed 60Hz tick
+		// is unchanged, and the debug advanceTime path (which steps ticks
+		// directly) never sees the scale — determinism guard, pinned in e2e.
+		clock?.advanceRealTime(seconds * timeScale.value);
+	},
+	() => performance.now(),
+);
+
 const renderer = createRenderer(canvas, {
 	camera,
 	scene: sceneView,
-	onFrame: (dtSeconds) => {
-		// Time-scale (P3-T3) scales the accumulator FEED RATE only: the fixed
-		// 60Hz tick is unchanged, and the debug advanceTime path (which steps
-		// ticks directly) never sees the scale — determinism guard, pinned in e2e.
-		clock?.advanceRealTime(dtSeconds * timeScale.value);
+	onFrame: () => {
+		// The pump consumed this frame's wall time already (or the fallback
+		// interval did — the pump makes double-feeding impossible).
+		simPump.pump();
 		refreshJointPanel?.();
 	},
 });
@@ -313,8 +352,15 @@ void (async () => {
 		console.warn("[par-physics] scene store unavailable", err);
 	}
 	if (forceDemo || (!debugEnabled && shouldLoadDemoScene(localStorage))) {
-		w.restoreSnapshot(buildDemoScene());
+		const demoEntities = buildDemoScene();
+		w.restoreSnapshot(demoEntities);
 		markDemoSceneSeen(localStorage);
+		// The fit itself runs at the END of boot (bottom of this IIFE): the
+		// tool rail and context panels attach later in the same IIFE, and
+		// the fit must measure the SETTLED canvas rect or the scene lands
+		// off-center by half a panel width.
+		demoBooted = true;
+		demoEntitiesForFit = demoEntities;
 	} else {
 		const autosave = await sceneStore.loadAutosave().catch(() => null);
 		if (autosave && validateSceneFile(autosave).ok) {
@@ -387,7 +433,9 @@ void (async () => {
 	};
 	const loadDemo = (): void => {
 		session?.cancel();
-		w.restoreSnapshot(buildDemoScene());
+		const demoEntities = buildDemoScene();
+		w.restoreSnapshot(demoEntities);
+		fitCameraToScene(demoEntities);
 		session?.selectedIds.clear();
 		if (session) session.hoverId = undefined;
 		undoStack.clear();
@@ -493,4 +541,11 @@ void (async () => {
 		initial: savedAssemblies,
 	});
 	clock = simClock;
+	// Demo-boot camera fit LAST: every panel is attached and the demo (if
+	// any) restored; two rAFs guarantee the settled layout is measured.
+	if (demoBooted && demoEntitiesForFit) {
+		requestAnimationFrame(() =>
+			requestAnimationFrame(() => fitCameraToScene(demoEntitiesForFit!)),
+		);
+	}
 })();

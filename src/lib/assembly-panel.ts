@@ -99,7 +99,7 @@ export function attachAssemblyPanel(deps: AssemblyPanelDeps): void {
 			main.type = "button";
 			main.className = "mat-row-main";
 			main.dataset.asmStamp = assembly.id;
-			main.title = "Click, then click the canvas to place a copy";
+			main.dataset.tip = "Click, then click the canvas to place a copy";
 			const name = document.createElement("span");
 			name.className = "mat-name";
 			name.textContent = assembly.name;

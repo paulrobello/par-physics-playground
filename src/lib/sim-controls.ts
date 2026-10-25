@@ -185,7 +185,7 @@ export function attachSimControls(deps: SimControlsDeps): () => void {
 	function syncPause(): void {
 		const { label, pressed } = pauseButtonState(clock.isPaused);
 		pauseBtn.setAttribute("aria-label", label);
-		pauseBtn.title = label;
+		pauseBtn.dataset.tip = label;
 		pauseBtn.setAttribute("aria-pressed", pressed ? "true" : "false");
 	}
 

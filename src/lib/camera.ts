@@ -90,3 +90,36 @@ export interface CameraState {
 export function clampZoom(zoom: number): number {
 	return Math.min(Math.max(zoom, MIN_ZOOM), MAX_ZOOM);
 }
+
+/**
+ * Camera transform that CENTERS a world-space content rectangle in a
+ * viewport (the demo scene's boot view: it used to sit at the generic
+ * ground-at-bottom default and drew off to the right). Pure math shared by
+ * every demo-load path; zoom fits the rectangle plus a world-units margin
+ * inside the viewport, clamped to [MIN_ZOOM, MAX_ZOOM].
+ */
+export function cameraFitForBounds(
+	minX: number,
+	minY: number,
+	maxX: number,
+	maxY: number,
+	viewportWidth: number,
+	viewportHeight: number,
+	marginWorld = 30,
+): CameraState {
+	const centerX = (minX + maxX) / 2;
+	const centerY = (minY + maxY) / 2;
+	const spanX = maxX - minX + marginWorld * 2;
+	const spanY = maxY - minY + marginWorld * 2;
+	const zoom = clampZoom(
+		Math.min(
+			viewportWidth > 0 ? viewportWidth / spanX : MAX_ZOOM,
+			viewportHeight > 0 ? viewportHeight / spanY : MAX_ZOOM,
+		),
+	);
+	return {
+		zoom,
+		offsetX: viewportWidth / 2 - centerX * zoom,
+		offsetY: viewportHeight / 2 - centerY * zoom,
+	};
+}

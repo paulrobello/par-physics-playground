@@ -10,30 +10,30 @@
 		<div id="app">
 			<header id="top-bar">
 				<h1>Par Physics Playground</h1>
-				<button type="button" class="mat-btn sim-preset-btn" data-sim="demo" title="Load the built-in demo scene (a Rube Goldberg starter machine)">Demo scene</button>
-				<button type="button" class="mat-btn sim-preset-btn" data-sim="new-world" title="Clear the world to an empty scene">New empty world</button>
+				<button type="button" class="mat-btn sim-preset-btn" data-sim="demo" data-tip="Load the built-in demo scene (a Rube Goldberg starter machine)">Demo scene</button>
+				<button type="button" class="mat-btn sim-preset-btn" data-sim="new-world" data-tip="Clear the world to an empty scene">New empty world</button>
 				<div class="scenes-menu">
-					<button type="button" class="mat-btn sim-preset-btn" data-scenes="open" aria-haspopup="true" aria-expanded="false" title="Saved scenes, JSON export and import">Scenes</button>
+					<button type="button" class="mat-btn sim-preset-btn" data-scenes="open" aria-haspopup="true" aria-expanded="false" data-tip="Saved scenes, JSON export and import">Scenes</button>
 					<div class="scenes-panel" data-scenes-menu hidden>
 						<form data-scenes="save-form">
 							<input data-scenes="save-name" type="text" placeholder="Scene name" maxlength="60" aria-label="Scene name" autocomplete="off" />
-							<button type="submit" class="mat-btn" data-scenes="save" title="Save the current world under this name">Save</button>
+							<button type="submit" class="mat-btn" data-scenes="save" data-tip="Save the current world under this name">Save</button>
 						</form>
 						<ul data-scenes="list" aria-label="Saved scenes"></ul>
 						<hr />
-						<button type="button" class="mat-btn" data-scenes="export" title="Download the current world as a JSON file">Export JSON</button>
-						<button type="button" class="mat-btn" data-scenes="import-open" title="Load a scene from a JSON file">Import JSON</button>
+						<button type="button" class="mat-btn" data-scenes="export" data-tip="Download the current world as a JSON file">Export JSON</button>
+						<button type="button" class="mat-btn" data-scenes="import-open" data-tip="Load a scene from a JSON file">Import JSON</button>
 						<input data-scenes="import" id="scene-import" type="file" accept="application/json,.json" hidden />
 					</div>
 				</div>
 				<div class="sim-controls" role="toolbar" aria-label="Simulation controls">
-					<button type="button" class="tool-btn" data-sim="pause" aria-label="Pause simulation (P)" aria-pressed="false" title="Pause (P)">
+					<button type="button" class="tool-btn" data-sim="pause" aria-label="Pause simulation (P)" aria-pressed="false" data-tip="Pause (P)">
 						<svg viewBox="0 0 16 16" aria-hidden="true"><rect x="4" y="3" width="3" height="10" rx="1" fill="currentColor"/><rect x="9" y="3" width="3" height="10" rx="1" fill="currentColor"/></svg>
 					</button>
-					<button type="button" class="tool-btn" data-sim="step" aria-label="Step one tick (.)" title="Step one tick (.)">
+					<button type="button" class="tool-btn" data-sim="step" aria-label="Step one tick (.)" data-tip="Step one tick (.)">
 						<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 3l7 5-7 5z" fill="currentColor"/><rect x="11" y="3" width="2.5" height="10" rx="1" fill="currentColor"/></svg>
 					</button>
-					<button type="button" class="tool-btn" data-sim="reset" aria-label="Reset world" title="Reset world">
+					<button type="button" class="tool-btn" data-sim="reset" aria-label="Reset world" data-tip="Reset world">
 						<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 3a5 5 0 1 1-4.9 6h1.55A3.5 3.5 0 1 0 8 4.5V6L4.5 3.5 8 1z" fill="currentColor"/></svg>
 					</button>
 					<span class="sim-sep" aria-hidden="true"></span>
@@ -48,9 +48,9 @@
 						<output data-sim="gravity-mag-out" for="sim-gravity-mag">9.81</output>
 					</div>
 					<span class="sim-presets">
-						<button type="button" class="mat-btn sim-preset-btn" data-gravity-preset="down" title="Preset: Earth gravity, 9.81 m/s² straight down">Down</button>
-						<button type="button" class="mat-btn sim-preset-btn" data-gravity-preset="zero-g" title="Preset: zero gravity — bodies drift">0g</button>
-						<button type="button" class="mat-btn sim-preset-btn" data-gravity-preset="moon" title="Preset: Moon gravity, 1.62 m/s² down">Moon</button>
+						<button type="button" class="mat-btn sim-preset-btn" data-gravity-preset="down" data-tip="Preset: Earth gravity, 9.81 m/s² straight down">Down</button>
+						<button type="button" class="mat-btn sim-preset-btn" data-gravity-preset="zero-g" data-tip="Preset: zero gravity — bodies drift">0g</button>
+						<button type="button" class="mat-btn sim-preset-btn" data-gravity-preset="moon" data-tip="Preset: Moon gravity, 1.62 m/s² down">Moon</button>
 					</span>
 					<span class="sim-sep" aria-hidden="true"></span>
 					<div class="sim-field">
@@ -61,73 +61,73 @@
 				</div>
 			</header>
 			<nav id="tool-rail" aria-label="Tools">
-				<label class="tool-btn" for="ppg-tool-select" data-tool="select" title="Select (V)"><input id="ppg-tool-select" type="radio" name="tool" value="select" checked>
+				<label class="tool-btn" for="ppg-tool-select" data-tool="select" data-tip="Select (V)"><input id="ppg-tool-select" type="radio" name="tool" value="select" checked>
 					<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 2l9 6-4 1-2 4z" fill="currentColor"/></svg>
 				</label>
-				<label class="tool-btn" for="ppg-tool-box" data-tool="box" title="Box (B)"><input id="ppg-tool-box" type="radio" name="tool" value="box">
+				<label class="tool-btn" for="ppg-tool-box" data-tool="box" data-tip="Box (B)"><input id="ppg-tool-box" type="radio" name="tool" value="box">
 					<svg viewBox="0 0 16 16" aria-hidden="true"><rect x="3" y="3" width="10" height="10" rx="1" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>
 				</label>
-				<label class="tool-btn" for="ppg-tool-joint" data-tool="joint" title="Joint (J)"><input id="ppg-tool-joint" type="radio" name="tool" value="joint">
+				<label class="tool-btn" for="ppg-tool-joint" data-tool="joint" data-tip="Joint (J)"><input id="ppg-tool-joint" type="radio" name="tool" value="joint">
 					<svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="4" fill="none" stroke="currentColor" stroke-width="1.5"/><circle cx="8" cy="8" r="1.5" fill="currentColor"/></svg>
 				</label>
 				<span class="joint-kinds" data-joint-kinds hidden>
-					<label class="tool-btn" for="ppg-joint-kind-pin" data-joint-kind="pin" title="Pin joint — free rotation about the shared pivot"><input id="ppg-joint-kind-pin" type="radio" name="joint-kind" value="pin" checked>
+					<label class="tool-btn" for="ppg-joint-kind-pin" data-joint-kind="pin" data-tip="Pin joint — free rotation about the shared pivot"><input id="ppg-joint-kind-pin" type="radio" name="joint-kind" value="pin" checked>
 						<svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="5" fill="none" stroke="currentColor" stroke-width="1.5"/><circle cx="8" cy="8" r="1.5" fill="currentColor"/></svg>
 					</label>
-					<label class="tool-btn" for="ppg-joint-kind-weld" data-joint-kind="weld" title="Weld joint — the pair moves as one rigid unit"><input id="ppg-joint-kind-weld" type="radio" name="joint-kind" value="weld">
+					<label class="tool-btn" for="ppg-joint-kind-weld" data-joint-kind="weld" data-tip="Weld joint — the pair moves as one rigid unit"><input id="ppg-joint-kind-weld" type="radio" name="joint-kind" value="weld">
 						<svg viewBox="0 0 16 16" aria-hidden="true"><rect x="3.5" y="3.5" width="9" height="9" rx="1" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>
 					</label>
-					<label class="tool-btn" for="ppg-joint-kind-rod" data-joint-kind="rod" title="Rod joint — the pair keeps an exact distance"><input id="ppg-joint-kind-rod" type="radio" name="joint-kind" value="rod">
+					<label class="tool-btn" for="ppg-joint-kind-rod" data-joint-kind="rod" data-tip="Rod joint — the pair keeps an exact distance"><input id="ppg-joint-kind-rod" type="radio" name="joint-kind" value="rod">
 						<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 12L12 4" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><circle cx="4" cy="12" r="1.4" fill="currentColor"/><circle cx="12" cy="4" r="1.4" fill="currentColor"/></svg>
 					</label>
-					<label class="tool-btn" for="ppg-joint-kind-slider" data-joint-kind="slider" title="Slider joint — translation along one axis within limits"><input id="ppg-joint-kind-slider" type="radio" name="joint-kind" value="slider">
+					<label class="tool-btn" for="ppg-joint-kind-slider" data-joint-kind="slider" data-tip="Slider joint — translation along one axis within limits"><input id="ppg-joint-kind-slider" type="radio" name="joint-kind" value="slider">
 						<svg viewBox="0 0 16 16" aria-hidden="true"><rect x="3" y="7" width="10" height="2" fill="currentColor"/><path d="M4 4v8M12 4v8" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>
 					</label>
-					<label class="tool-btn" for="ppg-joint-kind-motor" data-joint-kind="motor" title="Motor joint — powered rotation at a target speed"><input id="ppg-joint-kind-motor" type="radio" name="joint-kind" value="motor">
+					<label class="tool-btn" for="ppg-joint-kind-motor" data-joint-kind="motor" data-tip="Motor joint — powered rotation at a target speed"><input id="ppg-joint-kind-motor" type="radio" name="joint-kind" value="motor">
 						<svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="5" fill="none" stroke="currentColor" stroke-width="1.5"/><circle cx="8" cy="8" r="1.5" fill="currentColor"/><path d="M11.6 5.2a4 4 0 0 1 0 5.6" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
 					</label>
-					<label class="tool-btn" for="ppg-joint-kind-spring" data-joint-kind="spring" title="Spring joint — damped oscillation between two anchors"><input id="ppg-joint-kind-spring" type="radio" name="joint-kind" value="spring">
+					<label class="tool-btn" for="ppg-joint-kind-spring" data-joint-kind="spring" data-tip="Spring joint — damped oscillation between two anchors"><input id="ppg-joint-kind-spring" type="radio" name="joint-kind" value="spring">
 						<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8h1.5l1-2.5L7.5 10.5l2-5 1.5 2.5H13" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
 					</label>
-					<label class="tool-btn" for="ppg-joint-kind-rope" data-joint-kind="rope" title="Rope — draw a stroke; Shift snaps direction"><input id="ppg-joint-kind-rope" type="radio" name="joint-kind" value="rope">
+					<label class="tool-btn" for="ppg-joint-kind-rope" data-joint-kind="rope" data-tip="Rope — draw a stroke; Shift snaps direction"><input id="ppg-joint-kind-rope" type="radio" name="joint-kind" value="rope">
 						<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 11.5q2.5-5 5.5-2.5t5.5-3.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
 					</label>
-					<label class="tool-btn" for="ppg-joint-kind-pulley" data-joint-kind="pulley" title="Pulley — two clicks on bodies, a third click sets the fixed wheel"><input id="ppg-joint-kind-pulley" type="radio" name="joint-kind" value="pulley">
+					<label class="tool-btn" for="ppg-joint-kind-pulley" data-joint-kind="pulley" data-tip="Pulley — two clicks on bodies, a third click sets the fixed wheel"><input id="ppg-joint-kind-pulley" type="radio" name="joint-kind" value="pulley">
 						<svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="5" r="2.6" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M4.2 13.5L6.8 7.2M11.8 13.5L9.2 7.2" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
 					</label>
 				</span>
-				<label class="tool-btn" for="ppg-tool-circle" data-tool="circle" title="Circle (C)"><input id="ppg-tool-circle" type="radio" name="tool" value="circle">
+				<label class="tool-btn" for="ppg-tool-circle" data-tool="circle" data-tip="Circle (C)"><input id="ppg-tool-circle" type="radio" name="tool" value="circle">
 					<svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="5" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>
 				</label>
-				<label class="tool-btn" for="ppg-tool-polygon" data-tool="polygon" title="Polygon (G)"><input id="ppg-tool-polygon" type="radio" name="tool" value="polygon">
+				<label class="tool-btn" for="ppg-tool-polygon" data-tool="polygon" data-tip="Polygon (G)"><input id="ppg-tool-polygon" type="radio" name="tool" value="polygon">
 					<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 2.5l5.5 4-2.1 6.5H4.6L2.5 6.5z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg>
 				</label>
-				<label class="tool-btn" for="ppg-tool-line" data-tool="line" title="Line (L)"><input id="ppg-tool-line" type="radio" name="tool" value="line">
+				<label class="tool-btn" for="ppg-tool-line" data-tool="line" data-tip="Line (L)"><input id="ppg-tool-line" type="radio" name="tool" value="line">
 					<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 13L13 3" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><circle cx="3" cy="13" r="1.4" fill="currentColor"/><circle cx="13" cy="3" r="1.4" fill="currentColor"/></svg>
 				</label>
-				<label class="tool-btn" for="ppg-tool-freehand" data-tool="freehand" title="Freehand (F)"><input id="ppg-tool-freehand" type="radio" name="tool" value="freehand">
+				<label class="tool-btn" for="ppg-tool-freehand" data-tool="freehand" data-tip="Freehand (F)"><input id="ppg-tool-freehand" type="radio" name="tool" value="freehand">
 					<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 11.5C4 6 6 4.5 8 7.5s4 2 5.5-3" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
 				</label>
-				<label class="tool-btn" for="ppg-tool-text" data-tool="text" title="Text (T)"><input id="ppg-tool-text" type="radio" name="tool" value="text">
+				<label class="tool-btn" for="ppg-tool-text" data-tool="text" data-tip="Text (T)"><input id="ppg-tool-text" type="radio" name="tool" value="text">
 					<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 3.5h10M8 3.5V13M5.5 13h5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
 				</label>
-				<label class="tool-btn" for="ppg-tool-thruster" data-tool="thruster" title="Thruster (H)"><input id="ppg-tool-thruster" type="radio" name="tool" value="thruster">
+				<label class="tool-btn" for="ppg-tool-thruster" data-tool="thruster" data-tip="Thruster (H)"><input id="ppg-tool-thruster" type="radio" name="tool" value="thruster">
 					<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8h7M10 8l-2.5-2M10 8l-2.5 2" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/><path d="M3 5.5v5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
 				</label>
 				<span class="tool-sep" aria-hidden="true"></span>
-				<button type="button" class="tool-btn" data-mode="static" aria-label="Static mode (S)" aria-pressed="false" title="Static mode (S) — box, circle, polygon, line and freehand spawns become terrain (infinite mass)">
+				<button type="button" class="tool-btn" data-mode="static" aria-label="Static mode (S)" aria-pressed="false" data-tip="Static mode (S) — box, circle, polygon, line and freehand spawns become terrain (infinite mass)">
 					<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2 11.5h12M2 11.5l4-5 4 3 4-6" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
 				</button>
-				<button type="button" class="tool-btn" data-action="undo" aria-label="Undo (Cmd/Ctrl+Z)" title="Undo (Cmd/Ctrl+Z)" disabled>
+				<button type="button" class="tool-btn" data-action="undo" aria-label="Undo (Cmd/Ctrl+Z)" data-tip="Undo (Cmd/Ctrl+Z)" disabled>
 					<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M6.5 3L3 6.5 6.5 10M3 6.5h6a3.5 3.5 0 0 1 0 7H6" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
 				</button>
-				<button type="button" class="tool-btn" data-action="redo" aria-label="Redo (Cmd/Ctrl+Shift+Z)" title="Redo (Cmd/Ctrl+Shift+Z)" disabled>
+				<button type="button" class="tool-btn" data-action="redo" aria-label="Redo (Cmd/Ctrl+Shift+Z)" data-tip="Redo (Cmd/Ctrl+Shift+Z)" disabled>
 					<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M9.5 3L13 6.5 9.5 10M13 6.5H7a3.5 3.5 0 0 0 0 7h3" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
 				</button>
-				<button type="button" class="tool-btn" data-action="duplicate" aria-label="Duplicate selection (Ctrl/Cmd+D)" title="Duplicate (Ctrl/Cmd+D)">
+				<button type="button" class="tool-btn" data-action="duplicate" aria-label="Duplicate selection (Ctrl/Cmd+D)" data-tip="Duplicate (Ctrl/Cmd+D)">
 					<svg viewBox="0 0 16 16" aria-hidden="true"><rect x="5.5" y="5.5" width="8" height="8" rx="1" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M3 10.5V3.5A.5.5 0 0 1 3.5 3h7" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>
 				</button>
-				<button type="button" class="tool-btn" data-action="delete" aria-label="Delete selection (Delete)" title="Delete (Delete)">
+				<button type="button" class="tool-btn" data-action="delete" aria-label="Delete selection (Delete)" data-tip="Delete (Delete)">
 					<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 4.5h10M6.5 4.5V3a1 1 0 0 1 1-1h1a1 1 0 0 1 1 1v1.5M4.5 4.5l.7 8a1 1 0 0 0 1 .9h3.6a1 1 0 0 0 1-.9l.7-8" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
 				</button>
 			</nav>

@@ -255,3 +255,42 @@ export function buildDemoScene(): DocEntity[] {
 
 	return entities;
 }
+
+/**
+ * Content bounds over a document's BODIES (labels/thrusters excluded — a
+ * far-flung label must not drag the camera fit out), or null when there are
+ * no bodies. Polygon points are centroid-local: their worst-case extent is
+ * their farthest point, which overestimates a rotated hull slightly but is
+ * exact enough for a camera fit. Pure; the camera-fit paths in main.ts use
+ * it to center the demo scene on boot.
+ */
+export function demoSceneBounds(
+	entities: readonly DocEntity[],
+): { minX: number; minY: number; maxX: number; maxY: number } | null {
+	let minX = Number.POSITIVE_INFINITY;
+	let minY = Number.POSITIVE_INFINITY;
+	let maxX = Number.NEGATIVE_INFINITY;
+	let maxY = Number.NEGATIVE_INFINITY;
+	for (const e of entities) {
+		if (e.kind !== "body") continue;
+		const shape = e.shape;
+		let reach: number;
+		if (shape.kind === "box") {
+			reach = Math.hypot(shape.halfWidth, shape.halfHeight);
+		} else if (shape.kind === "circle") {
+			reach = shape.radius;
+		} else {
+			let far = 0;
+			for (const p of shape.points) {
+				far = Math.max(far, Math.hypot(p.x, p.y));
+			}
+			reach = far;
+		}
+		minX = Math.min(minX, e.x - reach);
+		maxX = Math.max(maxX, e.x + reach);
+		minY = Math.min(minY, e.y - reach);
+		maxY = Math.max(maxY, e.y + reach);
+	}
+	if (minX === Number.POSITIVE_INFINITY) return null;
+	return { minX, minY, maxX, maxY };
+}

@@ -102,17 +102,17 @@ export function attachSceneUI(options: SceneUIOptions): void {
 					load.type = "button";
 					load.dataset.sceneLoad = name;
 					load.textContent = name;
-					load.title = `Load "${name}"`;
+					load.dataset.tip = `Load "${name}"`;
 					const rename = document.createElement("button");
 					rename.type = "button";
 					rename.dataset.sceneRen = name;
 					rename.textContent = "Rename";
-					rename.title = `Rename "${name}"`;
+					rename.dataset.tip = `Rename "${name}"`;
 					const del = document.createElement("button");
 					del.type = "button";
 					del.dataset.sceneDel = name;
 					del.textContent = "Delete";
-					del.title = `Delete "${name}"`;
+					del.dataset.tip = `Delete "${name}"`;
 					li.append(load, rename, del);
 					list.append(li);
 				}

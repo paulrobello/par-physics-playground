@@ -813,3 +813,88 @@ input[type="range"]:hover::-moz-range-thumb {
 .tool-btn:has(input[type="radio"]:focus-visible) {
 	box-shadow: var(--glow-accent);
 }
+
+/* Widget tooltips (data-tip, replacing native title attributes): a raised
+ * dark panel with a border, shadow, and arrow, delayed-faded in on hover
+ * AND keyboard focus so every control explains itself without a pointer
+ * device. Position follows the chrome the control lives in: the left tool
+ * rail opens to the RIGHT, everything else (top bar) opens BELOW. Pure CSS
+ * — the delay is a transition-delay on the shown state only, so dismissal
+ * stays snappy. */
+[data-tip] {
+	position: relative;
+}
+
+[data-tip]::after {
+	content: attr(data-tip);
+	position: absolute;
+	z-index: 50;
+	top: calc(100% + 9px);
+	left: 50%;
+	transform: translate(-50%, -3px);
+	padding: 5px 10px;
+	border-radius: 6px;
+	border: 1px solid var(--border-strong);
+	background: var(--surface-raised);
+	color: var(--text);
+	font-size: 12px;
+	line-height: 1.35;
+	white-space: nowrap;
+	box-shadow: var(--shadow-lift-strong);
+	opacity: 0;
+	pointer-events: none;
+	transition:
+		opacity 0.12s ease,
+		transform 0.12s ease;
+}
+
+[data-tip]::before {
+	content: "";
+	position: absolute;
+	z-index: 50;
+	top: calc(100% + 4px);
+	left: 50%;
+	transform: translateX(-50%);
+	border: 5px solid transparent;
+	border-top-color: var(--surface-raised);
+	opacity: 0;
+	pointer-events: none;
+	transition: opacity 0.12s ease;
+}
+
+[data-tip]:hover::after,
+[data-tip]:focus-visible::after,
+[data-tip]:focus-within::after,
+[data-tip]:hover::before,
+[data-tip]:focus-visible::before,
+[data-tip]:focus-within::before {
+	opacity: 1;
+	transition-delay: 0.4s;
+}
+
+[data-tip]:hover::after,
+[data-tip]:focus-visible::after,
+[data-tip]:focus-within::after {
+	transform: translate(-50%, 0);
+}
+
+/* Tool rail: open to the right of the button, arrow pointing left. */
+.tool-btn[data-tip]::after {
+	top: 50%;
+	left: calc(100% + 9px);
+	transform: translate(-3px, -50%);
+}
+
+.tool-btn[data-tip]::before {
+	top: 50%;
+	left: calc(100% + 4px);
+	transform: translateY(-50%);
+	border-top-color: transparent;
+	border-left-color: var(--surface-raised);
+}
+
+.tool-btn[data-tip]:hover::after,
+.tool-btn[data-tip]:focus-visible::after,
+.tool-btn[data-tip]:focus-within::after {
+	transform: translate(0, -50%);
+}
