@@ -9,9 +9,9 @@ test("boots canvas and HUD skeleton", async ({ page }) => {
 
 	await page.goto("/?debug=1");
 	await expect(page.locator("#stage")).toBeVisible();
-	await expect(page.locator("#top-bar")).toContainText(
-		"Par Physics Playground",
-	);
+	// The app name lives in the document title only — the top bar is
+	// icon+tooltip controls since 2026-10-25.
+	await expect(page).toHaveTitle("Par Physics Playground");
 	await expect(page.locator("#tool-rail")).toBeAttached();
 	await expect(page.locator("#context-panel")).toBeAttached();
 

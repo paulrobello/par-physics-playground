@@ -132,12 +132,13 @@ output {
 	box-shadow: 0 0 8px rgba(244, 67, 54, 0.35);
 }
 
-#top-bar h1 {
-	margin: 0;
-	font-size: 13px;
-	font-weight: 600;
-	letter-spacing: -0.01em;
-	color: var(--hud-text);
+/* Icon-only header buttons (demo / new world / scenes): the icon is the
+   whole affordance, the tooltip carries the name (Paul, 2026-10-25). */
+.sim-preset-btn svg {
+	width: 14px;
+	height: 14px;
+	display: block;
+	margin: 0 auto;
 }
 
 #status-bar {
@@ -624,6 +625,7 @@ input[type="range"]:hover::-moz-range-thumb {
 	padding: 6px 8px;
 	font: inherit;
 	font-size: 12px;
+	white-space: nowrap;
 	background: transparent;
 	border: 1px solid var(--panel-border);
 	border-radius: 6px;
