@@ -675,6 +675,45 @@ input[type="range"]:hover::-moz-range-thumb {
 	margin-top: 8px;
 }
 
+/* Label properties section: the joint-panel framing, controls shared. */
+.label-panel {
+	padding: 8px 0 0;
+	border-top: 1px solid var(--panel-border);
+	margin-top: 8px;
+}
+
+.label-panel h2 {
+	margin: 0 0 6px;
+	font-size: 11px;
+	font-weight: 500;
+	letter-spacing: 0.06em;
+	color: var(--hud-text-secondary);
+}
+
+.label-panel select {
+	padding: 4px 6px;
+	font:
+		500 12px / 1.3 system-ui,
+		-apple-system,
+		"Segoe UI",
+		sans-serif;
+	color: var(--hud-text);
+	background: #111418;
+	border: 1px solid var(--border-strong);
+	border-radius: 6px;
+}
+
+.label-panel select:focus-visible {
+	outline: none;
+	box-shadow: var(--glow-accent);
+	border-color: var(--accent);
+}
+
+/* Two selects share the Font/Align field row. */
+.label-panel .joint-field:has(select + select) {
+	grid-template-columns: 1fr 1fr;
+}
+
 .joint-panel h2 {
 	margin: 0 0 6px;
 	font-size: 11px;

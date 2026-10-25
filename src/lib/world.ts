@@ -19,6 +19,8 @@ import {
 	type DocEntity,
 	defaultBody,
 	type LabelEntity,
+	type LabelFont,
+	type LabelTextAlign,
 	type Material,
 	SceneDocument,
 } from "./document";
@@ -396,6 +398,18 @@ export class PhysicsWorld {
 
 	setLabelText(id: DocumentId, text: string): void {
 		this.doc.setLabelText(id, text);
+	}
+
+	/** Label style patch (size/font/align); false when the id is not a label. */
+	setLabelStyle(
+		id: DocumentId,
+		patch: {
+			size?: number | undefined;
+			font?: LabelFont | undefined;
+			align?: LabelTextAlign | undefined;
+		},
+	): boolean {
+		return this.doc.setLabelStyle(id, patch);
 	}
 
 	/**

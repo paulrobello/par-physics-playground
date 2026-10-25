@@ -117,7 +117,14 @@ export interface BodyEntity {
  * hit-tests, with no Rapier body (PRD D19 uniformity — it selects, moves, and
  * deletes through the same document API). `rot` exists for future editing but
  * no tool sets it yet.
+ *
+ * Style fields are optional so pre-panel scenes render exactly as before:
+ * `size` in world units (undefined = the default zoom-adaptive size), `font`
+ * family, `align` relative to the anchor point.
  */
+export type LabelFont = "sans" | "serif" | "mono";
+export type LabelTextAlign = "left" | "center" | "right";
+
 export interface LabelEntity {
 	readonly kind: "label";
 	readonly id: DocumentId;
@@ -125,6 +132,9 @@ export interface LabelEntity {
 	readonly y: number;
 	readonly rot: number;
 	readonly text: string;
+	readonly size?: number | undefined;
+	readonly font?: LabelFont | undefined;
+	readonly align?: LabelTextAlign | undefined;
 }
 
 /** Anything the document stores: bodies, labels, joints (P4), thrusters (P4-T5). */
@@ -260,6 +270,21 @@ export class SceneDocument {
 		const entity = this.entities.get(id);
 		if (entity?.kind !== "label") return false;
 		this.entities.set(id, { ...entity, text });
+		return true;
+	}
+
+	/** Update a label's style (size/font/align); false when not a label. */
+	setLabelStyle(
+		id: DocumentId,
+		patch: {
+			size?: number | undefined;
+			font?: LabelFont | undefined;
+			align?: LabelTextAlign | undefined;
+		},
+	): boolean {
+		const entity = this.entities.get(id);
+		if (entity?.kind !== "label") return false;
+		this.entities.set(id, { ...entity, ...patch });
 		return true;
 	}
 

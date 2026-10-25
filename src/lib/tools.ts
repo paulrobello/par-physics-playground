@@ -6,7 +6,7 @@
  * world coordinates (y-down world per src/lib/world.ts). DOM wiring lives in
  * src/lib/interaction.ts.
  */
-import type { BodyShape } from "./document";
+import type { BodyShape, LabelTextAlign } from "./document";
 import {
 	decideFreehand,
 	type FreehandDecision,
@@ -402,12 +402,18 @@ export function labelBounds(
 	y: number,
 	text: string,
 	fontSize = LABEL_FONT_SIZE,
+	align: LabelTextAlign = "left",
 ): { x0: number; y0: number; x1: number; y1: number } {
 	const width = Math.max(text.length * LABEL_CHAR_WIDTH * fontSize, fontSize);
+	// Alignment shifts the box relative to the anchor: left starts at it,
+	// center straddles it, right ends at it (the renderer's ctx.textAlign
+	// reads the same anchor semantics).
+	const x0 =
+		align === "left" ? x : align === "center" ? x - width / 2 : x - width;
 	return {
-		x0: x,
+		x0,
 		y0: y - fontSize * 0.85,
-		x1: x + width,
+		x1: x0 + width,
 		y1: y + fontSize * 0.3,
 	};
 }
@@ -425,16 +431,20 @@ export function pickLabel(
 		readonly y: number;
 		readonly text: string;
 		readonly rot?: number;
+		readonly size?: number | undefined;
+		readonly align?: LabelTextAlign | undefined;
 	}[],
 	wx: number,
 	wy: number,
 	zoom = 1,
 ): string | undefined {
-	const fontSize = effectiveLabelFontSize(zoom);
 	for (let i = labels.length - 1; i >= 0; i--) {
 		const label = labels[i];
 		if (!label) continue;
-		const b = labelBounds(0, 0, label.text, fontSize);
+		// A user-set size overrides the zoom-adaptive default (matching the
+		// renderer); alignment shifts the box the same way it draws.
+		const fontSize = label.size ?? effectiveLabelFontSize(zoom);
+		const b = labelBounds(0, 0, label.text, fontSize, label.align ?? "left");
 		const angle = -(label.rot ?? 0);
 		const dx = wx - label.x;
 		const dy = wy - label.y;
@@ -1059,8 +1069,21 @@ export class ToolSession {
 		return true;
 	}
 
-	/** Delete the selection; false when nothing is selected. */
-	requestDelete(): boolean {
+	/**
+	 * Re-enter the inline label edit on an EXISTING label (double-click with
+	 * the select tool): the same phase and commit contract as the text tool's
+	 * placement flow, with one undo action opened for the text change. The
+	 * edited label becomes the selection so the properties panel follows.
+	 */
+	beginTextEditing(id: string, x: number, y: number, text: string): void {
+		if (this.phase.kind === "dragging") this.events.onDragEnd();
+		if (this.phase.kind === "rotating") this.events.onRotateEnd();
+		this.events.onBeginAction?.();
+		this.selectedIds = new Set([id]);
+		this.phase = { kind: "text-editing", id, anchorX: x, anchorY: y, text };
+	}
+
+	/** Delete the selection; false when nothing is selected. */ requestDelete(): boolean {
 		if (this.selectedIds.size === 0) return false;
 		if (this.phase.kind === "dragging" || this.phase.kind === "rotating")
 			this.cancel();

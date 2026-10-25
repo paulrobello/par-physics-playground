@@ -9,6 +9,7 @@
  */
 
 import type { Camera } from "./lib/camera";
+import type { LabelFont, LabelTextAlign } from "./lib/document";
 import type { JointType } from "./lib/joint";
 import { jointGlyphRadius } from "./lib/joint";
 import {
@@ -35,7 +36,19 @@ export interface SceneView {
 	): void;
 	/** Non-physical labels, in document order (drawn above bodies). */
 	forEachLabel(
-		fn: (id: string, x: number, y: number, rot: number, text: string) => void,
+		fn: (
+			id: string,
+			x: number,
+			y: number,
+			rot: number,
+			text: string,
+			/** World-unit size override; undefined renders at the zoom-adaptive default. */
+			size: number | undefined,
+			/** Font family override; undefined is the sans default. */
+			font: LabelFont | undefined,
+			/** Alignment at the anchor point; undefined is left. */
+			align: LabelTextAlign | undefined,
+		) => void,
 	): void;
 	/** Joints with their live anchor positions, in document order. */
 	forEachJoint(
@@ -742,18 +755,19 @@ export function createRenderer(
 	}
 
 	/**
-	 * Committed labels: the text drawn in world space, anchored at the left
-	 * end of the baseline. The font scales with the camera transform, clamped
-	 * to a readable screen-size window ([LABEL_MIN_PX, LABEL_MAX_PX] CSS px)
-	 * so zooming out never makes labels unreadably small and zooming in never
-	 * makes them balloon.
+	 * Committed labels: text drawn in world space at the anchor point. A
+	 * user-set size (label panel) scales with the camera transform; labels
+	 * without one keep the zoom-adaptive default so old scenes render exactly
+	 * as before.
 	 */
 	function drawLabels(zoom: number): void {
 		const scene = options.scene;
 		if (!scene) return;
 		ctx.fillStyle = LABEL_COLOR;
-		ctx.font = labelFont(zoom);
-		scene.forEachLabel((_id, x, y, rot, text) => {
+		scene.forEachLabel((_id, x, y, rot, text, size, font, align) => {
+			const px = size ?? effectiveLabelFontSize(zoom);
+			ctx.font = `${px}px ${labelFontFamily(font)}`;
+			ctx.textAlign = align ?? "left";
 			ctx.save();
 			ctx.translate(x, y);
 			ctx.rotate(rot);
@@ -762,13 +776,11 @@ export function createRenderer(
 		});
 	}
 
-	/**
-	 * The canvas font string for labels at the current zoom: the shared
-	 * {@link effectiveLabelFontSize} — the same size the picker and the
-	 * selection outline use, so hit boxes match the drawn glyphs.
-	 */
-	function labelFont(zoom: number): string {
-		return `${effectiveLabelFontSize(zoom)}px system-ui, -apple-system, sans-serif`;
+	/** The canvas font-family list for a label family (sans = the default). */
+	function labelFontFamily(font: LabelFont | undefined): string {
+		if (font === "serif") return 'Georgia, "Times New Roman", serif';
+		if (font === "mono") return "ui-monospace, Menlo, Consolas, monospace";
+		return "system-ui, -apple-system, sans-serif";
 	}
 
 	/** Accent outlines + glow around every selected body. Takes the LIVE
@@ -800,16 +812,34 @@ export function createRenderer(
 			ctx.restore();
 		});
 		// Selected labels: accent rectangle around the estimated hit box,
-		// sized to the font actually drawn at this zoom.
-		scene.forEachLabel((lid, x, y, rot, text) => {
-			if (!wanted.has(lid)) return;
-			ctx.save();
-			ctx.translate(x, y);
-			ctx.rotate(rot);
-			const b = labelBounds(0, 0, text, effectiveLabelFontSize(zoom));
-			ctx.strokeRect(b.x0, b.y0, b.x1 - b.x0, b.y1 - b.y0);
-			ctx.restore();
-		});
+		// sized to the font actually drawn at this zoom (a user-set label
+		// size overrides, and alignment shifts the box like the drawing).
+		scene.forEachLabel(
+			(
+				lid: string,
+				x: number,
+				y: number,
+				rot: number,
+				text: string,
+				size: number | undefined,
+				_font: LabelFont | undefined,
+				align: LabelTextAlign | undefined,
+			) => {
+				if (!wanted.has(lid)) return;
+				ctx.save();
+				ctx.translate(x, y);
+				ctx.rotate(rot);
+				const b = labelBounds(
+					0,
+					0,
+					text,
+					size ?? effectiveLabelFontSize(zoom),
+					align ?? "left",
+				);
+				ctx.strokeRect(b.x0, b.y0, b.x1 - b.x0, b.y1 - b.y0);
+				ctx.restore();
+			},
+		);
 		ctx.shadowColor = "transparent";
 		ctx.shadowBlur = 0;
 	}
@@ -938,7 +968,7 @@ export function createRenderer(
 			ctx.shadowColor = "transparent";
 			ctx.shadowBlur = 0;
 			ctx.fillStyle = LABEL_COLOR;
-			ctx.font = labelFont(zoom);
+			ctx.font = `${effectiveLabelFontSize(zoom)}px system-ui, -apple-system, sans-serif`;
 			if (p.text.length > 0) {
 				ctx.fillText(p.text, p.x, p.y);
 			} else {

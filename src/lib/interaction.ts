@@ -847,6 +847,12 @@ export interface ToolControlsDeps {
 	 * absent, undo/redo buttons are rendered but permanently disabled.
 	 */
 	undo?: UndoStack;
+	/**
+	 * Double-click on a label (select tool): re-enter its inline text edit.
+	 * Implemented in main.ts (the pickable label list lives there); a miss
+	 * returns false and the double-click means nothing.
+	 */
+	onLabelDoubleClick?: (wx: number, wy: number) => boolean;
 }
 
 /** Cursor while a draw tool is armed (the camera's resting cursor, too). */
@@ -1134,6 +1140,16 @@ export function attachToolControls(deps: ToolControlsDeps): () => void {
 	canvas.addEventListener("pointermove", onPointerMove);
 	canvas.addEventListener("pointerup", onPointerUp);
 	canvas.addEventListener("pointercancel", onPointerCancel);
+	// Double-click re-enters a label's inline text edit (select tool). The
+	// label lookup is injected (main.ts owns the pickable list); a miss is a
+	// no-op so double-clicks on bodies/space keep their meaning.
+	const onLabelDblClick = (event: MouseEvent): void => {
+		if (session.tool !== "select") return;
+		const p = worldFromEvent(event as unknown as PointerEvent);
+		deps.onLabelDoubleClick?.(p.x, p.y);
+	};
+	if (deps.onLabelDoubleClick)
+		canvas.addEventListener("dblclick", onLabelDblClick);
 	window.addEventListener("keydown", onKeyDown);
 	window.addEventListener("keyup", onKeyUp);
 	window.addEventListener("blur", onWindowBlur);

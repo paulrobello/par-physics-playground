@@ -39,6 +39,7 @@ export const SCENE_BOUNDS = {
 	maxBodies: 1_200,
 	maxEntities: 1_600,
 	maxLabelText: 200,
+	maxLabelSize: 512,
 	maxThrusterStrength: 1e7,
 } as const;
 
@@ -167,6 +168,31 @@ function checkEntity(raw: unknown, index: number): string | null {
 			const text = (e as Record<string, unknown>).text;
 			if (typeof text !== "string" || text.length > SCENE_BOUNDS.maxLabelText) {
 				return `label ${String(e.id)} text missing or over ${SCENE_BOUNDS.maxLabelText} chars`;
+			}
+			const style = e as Record<string, unknown>;
+			if (
+				style.size !== undefined &&
+				(!isFiniteNumber(style.size) ||
+					style.size <= 0 ||
+					style.size > SCENE_BOUNDS.maxLabelSize)
+			) {
+				return `label ${String(e.id)} size outside (0, ${SCENE_BOUNDS.maxLabelSize}]`;
+			}
+			if (
+				style.font !== undefined &&
+				style.font !== "sans" &&
+				style.font !== "serif" &&
+				style.font !== "mono"
+			) {
+				return `label ${String(e.id)} font "${String(style.font)}" is not a known family`;
+			}
+			if (
+				style.align !== undefined &&
+				style.align !== "left" &&
+				style.align !== "center" &&
+				style.align !== "right"
+			) {
+				return `label ${String(e.id)} align "${String(style.align)}" is not a known alignment`;
 			}
 		}
 		if (e.kind === "joint") {

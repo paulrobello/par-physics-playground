@@ -12,6 +12,7 @@ import { attachCameraControls } from "./lib/camera-controls";
 import { SIM_SPEED_FACTOR, SimClock } from "./lib/clock";
 import { installDebugApi } from "./lib/debug-api";
 import { buildDemoScene, demoSceneBounds } from "./lib/demo-scene";
+import type { LabelFont, LabelTextAlign } from "./lib/document";
 import { attachDrawOptions } from "./lib/draw-options";
 import { markDemoSceneSeen, shouldLoadDemoScene } from "./lib/first-run";
 import {
@@ -21,6 +22,7 @@ import {
 	freshBodyId,
 } from "./lib/interaction";
 import { attachJointPanel } from "./lib/joint-panel";
+import { attachLabelPanel } from "./lib/label-panel";
 import { MATERIAL_DEFAULT_ID } from "./lib/material";
 import { attachMaterialPanel } from "./lib/material-panel";
 import { createMaterialStore } from "./lib/material-store";
@@ -56,6 +58,8 @@ const canvas: HTMLCanvasElement = stage;
 let clock: SimClock | null = null;
 /** Per-frame refresh for the joint panel section (set at panel attach). */
 let refreshJointPanel: (() => void) | null = null;
+/** Per-frame refresh for the label properties section (set at panel attach). */
+let refreshLabelPanel: (() => void) | null = null;
 /** Demo-boot camera fit: set by the boot branch, applied after ALL panels attach. */
 let demoBooted = false;
 let demoEntitiesForFit: Parameters<typeof fitCameraToScene>[0] | null = null;
@@ -103,6 +107,8 @@ function listPickableLabels(): {
 	y: number;
 	text: string;
 	rot: number;
+	size: number | undefined;
+	align: "left" | "center" | "right" | undefined;
 }[] {
 	const w = world;
 	if (!w) return [];
@@ -112,6 +118,8 @@ function listPickableLabels(): {
 		y: label.y,
 		text: label.text,
 		rot: label.rot,
+		size: label.size,
+		align: label.align,
 	}));
 }
 
@@ -207,12 +215,30 @@ const sceneView = {
 		});
 	},
 	forEachLabel(
-		fn: (id: string, x: number, y: number, rot: number, text: string) => void,
+		fn: (
+			id: string,
+			x: number,
+			y: number,
+			rot: number,
+			text: string,
+			size: number | undefined,
+			font: LabelFont | undefined,
+			align: LabelTextAlign | undefined,
+		) => void,
 	): void {
 		const w = world;
 		if (!w) return;
 		w.eachLabel((label) =>
-			fn(label.id, label.x, label.y, label.rot, label.text),
+			fn(
+				label.id,
+				label.x,
+				label.y,
+				label.rot,
+				label.text,
+				label.size,
+				label.font,
+				label.align,
+			),
 		);
 	},
 	forEachThruster(
@@ -303,6 +329,7 @@ const renderer = createRenderer(canvas, {
 		// interval did — the pump makes double-feeding impossible).
 		simPump.pump();
 		refreshJointPanel?.();
+		refreshLabelPanel?.();
 	},
 });
 attachCameraControls(
@@ -427,7 +454,24 @@ void (async () => {
 	);
 	const toolbar = document.querySelector<HTMLElement>("#tool-rail");
 	if (!toolbar) throw new Error("#tool-rail missing from index.html");
-	attachToolControls({ toolbar, canvas, camera, session, undo: undoStack });
+	attachToolControls({
+		toolbar,
+		canvas,
+		camera,
+		session,
+		undo: undoStack,
+		// Double-click re-enters a placed label's inline text edit (the panel
+		// then shows its properties; the edit commits on Enter/Escape/click).
+		onLabelDoubleClick: (wx, wy) => {
+			const hit = pickLabel(listPickableLabels(), wx, wy, camera.zoom);
+			const s = session;
+			if (!hit || !s) return false;
+			const label = w.labelOf(hit);
+			if (!label) return false;
+			s.beginTextEditing(hit, label.x, label.y, label.text);
+			return true;
+		},
+	});
 	// Debug mode must pause the clock BEFORE the sim controls attach, so the
 	// pause button's initial aria state reflects the paused clock.
 	if (debugEnabled) simClock.setPaused(true);
@@ -555,6 +599,13 @@ void (async () => {
 		canvas,
 		camera,
 		initial: savedAssemblies,
+	});
+	// Label properties section (same append pattern): rides the rAF refresh.
+	refreshLabelPanel = attachLabelPanel({
+		host: contextPanel,
+		world: w,
+		session,
+		undo: undoStack,
 	});
 	clock = simClock;
 	// Demo-boot camera fit LAST: every panel is attached and the demo (if
