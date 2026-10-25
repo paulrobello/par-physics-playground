@@ -774,6 +774,21 @@ input[type="range"]:hover::-moz-range-thumb {
 	margin-top: 8px;
 }
 
+/* Rotation section: the joint-panel framing, controls shared. */
+.rotate-panel {
+	padding: 8px 0 0;
+	border-top: 1px solid var(--panel-border);
+	margin-top: 8px;
+}
+
+.rotate-panel h2 {
+	margin: 0 0 6px;
+	font-size: 11px;
+	font-weight: 500;
+	letter-spacing: 0.06em;
+	color: var(--hud-text-secondary);
+}
+
 .label-panel h2 {
 	margin: 0 0 6px;
 	font-size: 11px;

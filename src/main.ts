@@ -26,6 +26,7 @@ import { attachLabelPanel } from "./lib/label-panel";
 import { MATERIAL_DEFAULT_ID } from "./lib/material";
 import { attachMaterialPanel } from "./lib/material-panel";
 import { createMaterialStore } from "./lib/material-store";
+import { attachRotatePanel } from "./lib/rotate-panel";
 import {
 	applySceneFile,
 	buildSceneFile,
@@ -73,6 +74,8 @@ let clock: SimClock | null = null;
 let refreshJointPanel: (() => void) | null = null;
 /** Per-frame refresh for the label properties section (set at panel attach). */
 let refreshLabelPanel: (() => void) | null = null;
+/** Per-frame refresh for the rotation section (set at panel attach). */
+let refreshRotatePanel: (() => void) | null = null;
 /** The bottom status bar (help + census + FPS); built at boot. */
 let statusBar: StatusBar | null = null;
 /** Demo-boot camera fit: set by the boot branch, applied after ALL panels attach. */
@@ -378,6 +381,7 @@ const renderer = createRenderer(canvas, {
 		simPump.pump();
 		refreshJointPanel?.();
 		refreshLabelPanel?.();
+		refreshRotatePanel?.();
 		statusBar?.frame(dtSeconds);
 	},
 });
@@ -730,6 +734,13 @@ void (async () => {
 		world: w,
 		session,
 		undo: undoStack,
+	});
+	refreshRotatePanel = attachRotatePanel({
+		host: contextPanel,
+		world: w,
+		session,
+		undo: undoStack,
+		isPaused: () => clock?.isPaused ?? false,
 	});
 	clock = simClock;
 	// Demo-boot camera fit LAST: every panel is attached and the demo (if
