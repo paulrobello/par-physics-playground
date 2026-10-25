@@ -94,6 +94,15 @@ export function effectiveLabelFontSize(zoom: number): number {
 export const MIN_SHAPE_HALF_SIZE = 0.5;
 
 /**
+ * Spawn floor for the drag-drawn shapes (box, circle, beam): a plain click or
+ * a sub-minimum drag commits at this half-size instead of a pixel dot —
+ * 4 world units reads as a visible 8-unit shape at 1× zoom. The freehand
+ * simplification keeps its own, much finer granularity via
+ * {@link MIN_SHAPE_HALF_SIZE}.
+ */
+export const MIN_SPAWN_HALF_SIZE = 4;
+
+/**
  * Line/beam thickness: the beam is a thin rotated box (half-extent across the
  * segment). Chosen over a capsule for an exact rectangular silhouette and a
  * cheap collider; the width is fixed until a properties panel exists.
@@ -108,6 +117,14 @@ export const SEGMENT_CLICK_EPSILON = 0.05;
 
 /** Click within this world distance of the first vertex closes a polygon. */
 export const POLYGON_CLOSE_RADIUS = 0.75;
+
+/**
+ * The close hitbox is at least this many SCREEN pixels regardless of zoom
+ * (world radius = px / zoom) — the 0.75-world-unit floor is sub-pixel at 1×
+ * zoom, which made the close click unusable. The renderer draws the
+ * first-vertex ring at exactly this radius, so the ring IS the hitbox.
+ */
+export const POLYGON_CLOSE_SCREEN_PX = 12;
 
 /** How the inline label edit handles a key. */
 export type EditKeyAction = "commit" | "backspace" | "insert" | "ignore";
@@ -184,15 +201,15 @@ export function rectFromDrag(
 		? Math.max(
 				Math.abs(bx - ax) / 2,
 				Math.abs(by - ay) / 2,
-				MIN_SHAPE_HALF_SIZE,
+				MIN_SPAWN_HALF_SIZE,
 			)
 		: 0;
 	const halfWidth = square
 		? side
-		: Math.max(Math.abs(bx - ax) / 2, MIN_SHAPE_HALF_SIZE);
+		: Math.max(Math.abs(bx - ax) / 2, MIN_SPAWN_HALF_SIZE);
 	const halfHeight = square
 		? side
-		: Math.max(Math.abs(by - ay) / 2, MIN_SHAPE_HALF_SIZE);
+		: Math.max(Math.abs(by - ay) / 2, MIN_SPAWN_HALF_SIZE);
 	return { cx, cy, halfWidth, halfHeight };
 }
 
@@ -231,7 +248,7 @@ export function circleFromCenterDrag(
 	return {
 		cx: ax,
 		cy: ay,
-		radius: Math.max(Math.abs(bx - ax), Math.abs(by - ay), MIN_SHAPE_HALF_SIZE),
+		radius: Math.max(Math.abs(bx - ax), Math.abs(by - ay), MIN_SPAWN_HALF_SIZE),
 	};
 }
 
@@ -300,6 +317,11 @@ export type DrawPreview =
 			points: Vec2[];
 			/** The first vertex (the close-click target / dot the renderer draws). */
 			first: Vec2;
+			/**
+			 * The click-to-close hitbox radius in world units — the renderer
+			 * draws the first-vertex ring at exactly this radius.
+			 */
+			closeRadius: number;
 			closable: boolean;
 	  }
 	| { kind: "stroke"; points: readonly Vec2[] }
@@ -331,7 +353,7 @@ export function beamFromSegment(
 		cx: (ax + bx) / 2,
 		cy: (ay + by) / 2,
 		rot: Math.atan2(by - ay, bx - ax),
-		halfLength: Math.max(Math.hypot(bx - ax, by - ay) / 2, MIN_SHAPE_HALF_SIZE),
+		halfLength: Math.max(Math.hypot(bx - ax, by - ay) / 2, MIN_SPAWN_HALF_SIZE),
 		halfWidth: BEAM_HALF_WIDTH,
 	};
 }
@@ -821,6 +843,8 @@ export class ToolSession {
 	selectedIds: Set<string> = new Set();
 
 	private phase: Phase = { kind: "idle" };
+	/** Last pointer-event zoom (interaction.ts passes it); sizes screen-constant hitboxes. */
+	private lastZoom = 1;
 
 	constructor(
 		private readonly events: ToolSessionEvents,
@@ -894,9 +918,11 @@ export class ToolSession {
 				kind: "polygon",
 				points,
 				first,
+				closeRadius: this.polygonCloseRadius(),
 				closable:
 					this.phase.points.length >= 3 &&
-					dx * dx + dy * dy <= POLYGON_CLOSE_RADIUS * POLYGON_CLOSE_RADIUS,
+					dx * dx + dy * dy <=
+						this.polygonCloseRadius() * this.polygonCloseRadius(),
 			};
 		}
 		if (this.phase.kind === "text-editing") {
@@ -1103,7 +1129,25 @@ export class ToolSession {
 		return true;
 	}
 
-	pointerDown(wx: number, wy: number, mods: PointerMods = {}): void {
+	/**
+	 * The click-to-close radius in world units at the pointer's zoom: the
+	 * 0.75-unit floor, or 12 screen pixels — whichever is larger. Shared by
+	 * the close check and the preview so the drawn ring IS the hitbox.
+	 */
+	private polygonCloseRadius(): number {
+		return Math.max(
+			POLYGON_CLOSE_RADIUS,
+			POLYGON_CLOSE_SCREEN_PX / this.lastZoom,
+		);
+	}
+
+	pointerDown(
+		wx: number,
+		wy: number,
+		mods: PointerMods = {},
+		zoom?: number,
+	): void {
+		if (zoom !== undefined) this.lastZoom = zoom;
 		// A click during an in-progress label edit commits that label first
 		// (the click itself is not consumed — with the text tool it starts the
 		// next label, with any other tool it draws/selects).
@@ -1197,7 +1241,8 @@ export class ToolSession {
 			const dy = snapped.y - first.y;
 			if (
 				this.phase.points.length >= 3 &&
-				dx * dx + dy * dy <= POLYGON_CLOSE_RADIUS * POLYGON_CLOSE_RADIUS
+				dx * dx + dy * dy <=
+					this.polygonCloseRadius() * this.polygonCloseRadius()
 			) {
 				this.closePolygon();
 				return;
@@ -1369,7 +1414,13 @@ export class ToolSession {
 		this.events.onDragStart(hit, { x: wx, y: wy });
 	}
 
-	pointerMove(wx: number, wy: number, mods: { shift?: boolean } = {}): void {
+	pointerMove(
+		wx: number,
+		wy: number,
+		mods: { shift?: boolean } = {},
+		zoom?: number,
+	): void {
+		if (zoom !== undefined) this.lastZoom = zoom;
 		if (this.phase.kind === "drawing") {
 			const snapped = this.snapPoint(wx, wy);
 			this.phase = { ...this.phase, curX: snapped.x, curY: snapped.y };
@@ -1444,7 +1495,8 @@ export class ToolSession {
 		this.hoverId = this.pick(wx, wy);
 	}
 
-	pointerUp(): void {
+	pointerUp(zoom?: number): void {
+		if (zoom !== undefined) this.lastZoom = zoom;
 		if (this.phase.kind === "thruster-aim") {
 			const { id, anchorX, anchorY, aimX, aimY } = this.phase;
 			this.phase = { kind: "idle" };

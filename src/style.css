@@ -125,6 +125,13 @@ output {
 	background: transparent;
 }
 
+/* Armed reset: the button awaits its confirming second click. */
+#top-bar [data-sim="reset"].armed {
+	color: var(--danger-text);
+	border-color: var(--danger);
+	box-shadow: 0 0 8px rgba(244, 67, 54, 0.35);
+}
+
 #top-bar h1 {
 	margin: 0;
 	font-size: 13px;

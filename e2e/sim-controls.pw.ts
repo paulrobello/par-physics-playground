@@ -66,7 +66,10 @@ test("step advances exactly one tick; pause freezes; reset clears", async ({
 	});
 	let count = await page.evaluate(() => window.__ppg?.bodyIds().length ?? -1);
 	expect(count).toBe(3);
-	await page.click('[data-sim="reset"]');
+	await page.click('[data-sim="reset"]'); // arms only — the world survives
+	count = await page.evaluate(() => window.__ppg?.bodyIds().length ?? -1);
+	expect(count).toBe(3);
+	await page.click('[data-sim="reset"]'); // confirms within the arm window
 	count = await page.evaluate(() => window.__ppg?.bodyIds().length ?? -1);
 	expect(count).toBe(0);
 	// Post-reset sanity: a freshly spawned box still falls and settles on the

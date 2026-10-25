@@ -195,7 +195,33 @@ export function attachSimControls(deps: SimControlsDeps): () => void {
 	};
 
 	const stepOnce = (): void => clock.stepOnce();
-	const reset = (): void => onReset();
+
+	// Reset confirms (Paul, 2026-10-25): the first click ARMS the button for
+	// 3s — danger styling + a confirm tooltip — and only a second click
+	// inside the window wipes the world; timeout or cleanup disarms. The
+	// wipe is undo-history-clearing, so a stray click must not be lethal.
+	let resetArmed = false;
+	let disarmTimer: ReturnType<typeof setTimeout> | undefined;
+	const disarmReset = (): void => {
+		resetArmed = false;
+		clearTimeout(disarmTimer);
+		resetBtn.classList.remove("armed");
+		resetBtn.dataset.tip = "Reset world";
+		resetBtn.setAttribute("aria-label", "Reset world");
+	};
+	const reset = (): void => {
+		if (!resetArmed) {
+			resetArmed = true;
+			resetBtn.classList.add("armed");
+			resetBtn.dataset.tip = "Click again to confirm reset";
+			resetBtn.setAttribute("aria-label", "Confirm world reset");
+			clearTimeout(disarmTimer);
+			disarmTimer = setTimeout(disarmReset, 3000);
+			return;
+		}
+		disarmReset();
+		onReset();
+	};
 
 	pauseBtn.addEventListener("click", togglePause);
 	stepBtn.addEventListener("click", stepOnce);
@@ -290,14 +316,18 @@ export function attachSimControls(deps: SimControlsDeps): () => void {
 	const onKeyDown = (event: KeyboardEvent): void => {
 		if (deps.isEditingText?.() || event.defaultPrevented) return;
 		if (event.ctrlKey || event.metaKey || event.altKey) return;
-		// Text-entry targets keep their keys (matches camera/tool controls).
-		if (
-			event.target instanceof HTMLElement &&
-			(event.target.tagName === "INPUT" ||
-				event.target.tagName === "TEXTAREA" ||
-				event.target.isContentEditable)
-		)
-			return;
+		// Text-entry targets keep their keys; non-text-entry controls do not —
+		// a tool radio keeps FOCUS after its label click and must not swallow
+		// P / Period. Escape-like exemptions: none needed here (P and Period
+		// have no cancel meaning).
+		const target = event.target;
+		const isTextEntryTarget =
+			target instanceof HTMLElement &&
+			(target.tagName === "TEXTAREA" ||
+				target.isContentEditable ||
+				(target instanceof HTMLInputElement &&
+					!["radio", "checkbox", "button", "range"].includes(target.type)));
+		if (isTextEntryTarget) return;
 		const action = SIM_CONTROL_KEYS[event.code];
 		if (!action) return;
 		event.preventDefault();
@@ -319,6 +349,7 @@ export function attachSimControls(deps: SimControlsDeps): () => void {
 		if (timeInput) timeInput.removeEventListener("input", onTimeInput);
 		unsubTimeScale();
 		unsubGravity();
+		clearTimeout(disarmTimer);
 		window.removeEventListener("keydown", onKeyDown);
 	};
 }

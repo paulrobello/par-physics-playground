@@ -4,6 +4,7 @@ import {
 	beamFromSegment,
 	circleFromDrag,
 	constrainSegment,
+	MIN_SPAWN_HALF_SIZE,
 	type PickableBody,
 	pickBody,
 	rectFromDrag,
@@ -53,8 +54,8 @@ describe("rectFromDrag", () => {
 		const r = rectFromDrag(7, -3, 7, -3);
 		expect(r.cx).toBe(7);
 		expect(r.cy).toBe(-3);
-		expect(r.halfWidth).toBe(0.5);
-		expect(r.halfHeight).toBe(0.5);
+		expect(r.halfWidth).toBe(MIN_SPAWN_HALF_SIZE);
+		expect(r.halfHeight).toBe(MIN_SPAWN_HALF_SIZE);
 	});
 });
 
@@ -72,7 +73,7 @@ describe("circleFromDrag", () => {
 	});
 
 	test("click clamps to the minimum radius", () => {
-		expect(circleFromDrag(5, 5, 5, 5).radius).toBe(0.5);
+		expect(circleFromDrag(5, 5, 5, 5).radius).toBe(MIN_SPAWN_HALF_SIZE);
 	});
 });
 
@@ -208,7 +209,9 @@ describe("ToolSession — draw tools", () => {
 		session.setTool("circle");
 		session.pointerDown(3, 4);
 		session.pointerUp();
-		expect(log).toEqual([["circle", { cx: 3, cy: 4, radius: 0.5 }]]);
+		expect(log).toEqual([
+			["circle", { cx: 3, cy: 4, radius: MIN_SPAWN_HALF_SIZE }],
+		]);
 	});
 });
 
@@ -405,7 +408,7 @@ describe("beamFromSegment", () => {
 		const beam = beamFromSegment(3, 4, 3, 4);
 		expect(beam.cx).toBe(3);
 		expect(beam.cy).toBe(4);
-		expect(beam.halfLength).toBe(0.5);
+		expect(beam.halfLength).toBe(MIN_SPAWN_HALF_SIZE);
 	});
 });
 
@@ -515,6 +518,27 @@ describe("ToolSession — polygon tool", () => {
 				],
 			],
 		]);
+	});
+
+	test("the close radius is zoom-aware: 12 screen px, not the 0.75-unit floor", () => {
+		const { session, log } = makeSession(() => undefined);
+		session.setTool("polygon");
+		session.pointerDown(0, 0, {}, 0.5);
+		session.pointerUp(0.5);
+		session.pointerDown(30, 0, {}, 0.5);
+		session.pointerUp(0.5);
+		session.pointerDown(15, -20, {}, 0.5);
+		session.pointerUp(0.5);
+		session.pointerMove(0, -23, {}, 0.5);
+		const pv = session.preview();
+		if (!pv || pv.kind !== "polygon")
+			throw new Error("expected polygon preview");
+		// 12 screen px at zoom 0.5 = a 24-world-unit ring; the cursor sits 23
+		// units from the first vertex — inside, so closable and a click closes.
+		expect(pv.closeRadius).toBeCloseTo(24, 6);
+		expect(pv.closable).toBe(true);
+		session.pointerDown(0, -23, {}, 0.5);
+		expect(log).toHaveLength(1);
 	});
 
 	test("Enter with fewer than three vertices does nothing", () => {

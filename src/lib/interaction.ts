@@ -1005,12 +1005,12 @@ export function attachToolControls(deps: ToolControlsDeps): () => void {
 		canvas.setPointerCapture(event.pointerId);
 		event.preventDefault();
 		const p = worldFromEvent(event);
-		session.pointerDown(p.x, p.y, pointerMods(event));
+		session.pointerDown(p.x, p.y, pointerMods(event), camera.zoom);
 	};
 
 	const onPointerMove = (event: PointerEvent): void => {
 		const p = worldFromEvent(event);
-		session.pointerMove(p.x, p.y, { shift: event.shiftKey });
+		session.pointerMove(p.x, p.y, { shift: event.shiftKey }, camera.zoom);
 	};
 
 	const onPointerUp = (event: PointerEvent): void => {
@@ -1019,7 +1019,7 @@ export function attachToolControls(deps: ToolControlsDeps): () => void {
 		if (canvas.hasPointerCapture(event.pointerId)) {
 			canvas.releasePointerCapture(event.pointerId);
 		}
-		session.pointerUp();
+		session.pointerUp(camera.zoom);
 	};
 
 	// pointercancel must not commit the in-progress gesture: drop pointer
@@ -1068,17 +1068,20 @@ export function attachToolControls(deps: ToolControlsDeps): () => void {
 			return;
 		}
 		// Text-entry targets keep their keys (matches camera-controls) — but
-		// Escape always cancels: the joint-kind radios keep FOCUS after their
-		// label click, and the pulley's three-click flow must cancel with the
-		// radio still focused (a focused number input keeps its value too).
-		if (
-			event.target instanceof HTMLElement &&
-			(event.target.tagName === "INPUT" ||
-				event.target.tagName === "TEXTAREA" ||
-				event.target.isContentEditable) &&
-			event.code !== "Escape"
-		)
-			return;
+		// non-text-entry controls do not: a tool radio keeps FOCUS after its
+		// label click, and the guard used to swallow every shortcut except
+		// Escape from that focus (Enter never closed a polygon). Radio,
+		// checkbox, button, and range targets are not text entry; only real
+		// typing surfaces (text/number inputs, textareas, contenteditable)
+		// keep the keyboard. Escape always cancels regardless.
+		const target = event.target;
+		const isTextEntryTarget =
+			target instanceof HTMLElement &&
+			(target.tagName === "TEXTAREA" ||
+				target.isContentEditable ||
+				(target instanceof HTMLInputElement &&
+					!["radio", "checkbox", "button", "range"].includes(target.type)));
+		if (isTextEntryTarget && event.code !== "Escape") return;
 		if (event.code === "KeyR" && !event.repeat) syncRotate(true);
 		if ((event.ctrlKey || event.metaKey) && event.code === "KeyD") {
 			event.preventDefault();

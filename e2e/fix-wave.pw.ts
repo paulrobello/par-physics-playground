@@ -126,7 +126,8 @@ test("F5 F6 F14: running terrain edit and drag-delete lifetime; Reset clears his
 	expect(await page.evaluate(() => window.__ppg!.selectedIds())).toEqual([
 		"next",
 	]);
-	await page.locator('[data-sim="reset"]').click();
+	await page.locator('[data-sim="reset"]').click(); // arms only
+	await page.locator('[data-sim="reset"]').click(); // confirms
 	expect(
 		await page.evaluate(() => ({
 			ids: window.__ppg!.bodyIds(),

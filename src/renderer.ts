@@ -992,12 +992,32 @@ export function createRenderer(
 		ctx.stroke();
 		ctx.shadowColor = "transparent";
 		ctx.shadowBlur = 0;
-		if (p.kind === "polygon" && p.closable) {
-			// Accent dot on the first vertex: the close-click target.
+		if (p.kind === "polygon") {
+			// First-vertex close target, ALWAYS visible while placing: a dashed
+			// ring whose radius IS the click hitbox (tools.ts emits the same
+			// zoom-aware closeRadius), a center dot, and a soft fill while the
+			// cursor is inside (p.closable) so the release-closes state reads.
+			ctx.save();
+			if (p.closable) {
+				ctx.globalAlpha = 0.18;
+				ctx.fillStyle = ACCENT_COLOR;
+				ctx.beginPath();
+				ctx.arc(p.first.x, p.first.y, p.closeRadius, 0, Math.PI * 2);
+				ctx.fill();
+				ctx.globalAlpha = 1;
+			}
+			ctx.setLineDash([4 / zoom, 3 / zoom]);
+			ctx.strokeStyle = ACCENT_COLOR;
+			ctx.lineWidth = 1.5 / zoom;
+			ctx.beginPath();
+			ctx.arc(p.first.x, p.first.y, p.closeRadius, 0, Math.PI * 2);
+			ctx.stroke();
+			ctx.setLineDash([]);
 			ctx.fillStyle = ACCENT_COLOR;
 			ctx.beginPath();
-			ctx.arc(p.first.x, p.first.y, 4 / zoom, 0, Math.PI * 2);
+			ctx.arc(p.first.x, p.first.y, 2 / zoom, 0, Math.PI * 2);
 			ctx.fill();
+			ctx.restore();
 		}
 	}
 
