@@ -13,7 +13,7 @@
  * plain left-button presses.
  */
 import type { Camera } from "./camera";
-import { defaultBody } from "./document";
+import { type BodyShape, defaultBody } from "./document";
 import {
 	isPlaceableJointKind,
 	makeJoint,
@@ -377,6 +377,11 @@ export function createToolEvents(
 		dragGrab: { x: number; y: number } | null;
 		/** Base rotations captured at rotate-gesture start, by body id. */
 		rotateBase: Map<DocumentId, number>;
+		/**
+		 * Base shape+pose captured at gizmo-scale start, by body id — every
+		 * move re-applies from it, so per-move factors never compound.
+		 */
+		gizmoScaleBase: Map<DocumentId, { shape: BodyShape; x: number; y: number }>;
 		/** Removal handler; also installed on the world below. */
 		onRemove(id: DocumentId): void;
 	} = {
@@ -390,6 +395,7 @@ export function createToolEvents(
 		draggedId: undefined,
 		dragGrab: null,
 		rotateBase: new Map(),
+		gizmoScaleBase: new Map(),
 		onRemove(id: DocumentId): void {
 			if (this.draggedId === id) {
 				this.activeJoint = null;
@@ -397,6 +403,7 @@ export function createToolEvents(
 				this.dragGrab = null;
 			}
 			this.rotateBase.delete(id);
+			this.gizmoScaleBase.delete(id);
 			pruneSelection(id);
 		},
 		onSpawnBox({ cx, cy, halfWidth, halfHeight }) {
@@ -667,6 +674,37 @@ export function createToolEvents(
 						world.doc.setTransform(id, e.x, e.y, applied);
 				}
 			}
+		},
+		onGizmoScaleStart() {
+			// ONE undo action per completed handle drag: beginAction opens the
+			// snapshot, onGizmoScaleEnd records it (the rotate-gesture
+			// convention). Base shapes+poses capture now so per-move factors
+			// never compound.
+			beginAction();
+			this.gizmoScaleBase.clear();
+			for (const id of selectedIds()) {
+				const e = world.doc.get(id);
+				if (e?.kind !== "body") continue;
+				const b = world.bodies.get(id);
+				this.gizmoScaleBase.set(id, {
+					shape: e.shape,
+					x: b ? b.translation().x : e.x,
+					y: b ? b.translation().y : e.y,
+				});
+			}
+		},
+		onGizmoScale(factor, centerX, centerY) {
+			// The floor may shrink the applied factor per body; positions move
+			// by the APPLIED factor so a floored body stays anchored correctly.
+			for (const [id, base] of this.gizmoScaleBase) {
+				world.scaleBodyFrom(id, base, factor, centerX, centerY);
+			}
+		},
+		onGizmoScaleEnd() {
+			// Scale-end boundary (release, cancel, or tool switch): the
+			// undo stack dedupes a no-op drag, so a bare click on a handle
+			// never leaves an empty action behind.
+			recordAction();
 		},
 		onDelete(ids) {
 			beginAction();

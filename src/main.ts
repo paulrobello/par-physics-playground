@@ -16,6 +16,11 @@ import type { LabelFont, LabelTextAlign } from "./lib/document";
 import { attachDrawOptions } from "./lib/draw-options";
 import { markDemoSceneSeen, shouldLoadDemoScene } from "./lib/first-run";
 import {
+	accumulateShapeBounds,
+	type GizmoGeom,
+	resetBoundsAcc,
+} from "./lib/gizmo";
+import {
 	attachToolControls,
 	CURSOR_DRAW,
 	createToolEvents,
@@ -176,6 +181,55 @@ function listPickableThrusters(): { id: string; wx: number; wy: number }[] {
 /** Shared frozen empty selection: the scene adapter's no-session fallback
  * without an allocation (P5 per-frame allocation card). */
 const EMPTY_SELECTION: ReadonlySet<string> = new Set();
+
+/** Persistent gizmo geometry the selection walk fills (P5 allocation card:
+ * the per-frame read and the pointer hit-test share one record — the fields
+ * are assigned, so the record is a mutable local standing in for the
+ * readonly GizmoGeom it structurally satisfies). */
+const gizmoScratch: {
+	minX: number;
+	minY: number;
+	maxX: number;
+	maxY: number;
+	zoom: number;
+} = { minX: 0, minY: 0, maxX: 0, maxY: 0, zoom: 1 };
+const gizmoAcc = { minX: 0, minY: 0, maxX: 0, maxY: 0 };
+
+/**
+ * Transform gizmo geometry for the current selection: the combined world
+ * AABB of the selected BODIES at their live poses (labels/joints do not
+ * scale — a body-less selection hides the gizmo). Returns the shared scratch
+ * record, or null when the gizmo hides (no select tool, no selected body).
+ */
+function selectionGizmo(zoom: number): GizmoGeom | null {
+	const s = session;
+	const w = world;
+	if (!s || !w || s.tool !== "select" || s.selectedIds.size === 0) return null;
+	let found = false;
+	for (const id of s.selectedIds) {
+		const e = w.doc.get(id);
+		if (e?.kind !== "body") continue;
+		const b = w.bodies.get(id);
+		if (!found) {
+			resetBoundsAcc(gizmoAcc);
+			found = true;
+		}
+		accumulateShapeBounds(
+			e.shape,
+			b ? b.translation().x : e.x,
+			b ? b.translation().y : e.y,
+			b ? b.rotation() : e.rot,
+			gizmoAcc,
+		);
+	}
+	if (!found) return null;
+	gizmoScratch.minX = gizmoAcc.minX;
+	gizmoScratch.minY = gizmoAcc.minY;
+	gizmoScratch.maxX = gizmoAcc.maxX;
+	gizmoScratch.maxY = gizmoAcc.maxY;
+	gizmoScratch.zoom = zoom;
+	return gizmoScratch;
+}
 
 const sceneView = {
 	forEachBody(
@@ -366,6 +420,13 @@ const sceneView = {
 	},
 	rubberBand() {
 		return session?.rubberBand() ?? null;
+	},
+	// Transform gizmo (the transform-gizmo card): the selection's combined
+	// world AABB at the LIVE poses, over selected BODIES only (labels and
+	// joints do not scale — a body-less selection hides the gizmo). Scratch
+	// records only: the per-frame read allocates nothing (P5 card).
+	gizmo(): GizmoGeom | null {
+		return selectionGizmo(camera.zoom);
 	},
 	hoverId() {
 		return session?.hoverId;
@@ -568,6 +629,9 @@ void (async () => {
 		const b = w.bodies.get(id);
 		return b ? { x: b.translation().x, y: b.translation().y } : undefined;
 	};
+	// Transform gizmo: the session hit-tests handles against the CURRENT
+	// selection bounds (live poses) at press time.
+	events.gizmoGeom = () => selectionGizmo(camera.zoom);
 	events.onSnapBodies = ({ moverId, targetId }) => {
 		const target = w.bodies.get(targetId);
 		if (!target || !w.bodies.has(moverId)) return;

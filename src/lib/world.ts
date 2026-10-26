@@ -40,6 +40,7 @@ import { MATERIAL_DEFAULT_ID } from "./material";
 import { isMeltedThrough, MELT_SECONDS, meltRenderScale } from "./melting";
 import { PULLEY_MIN_LEG, solvePulleyImpulse } from "./pulley";
 import { type ThrusterEntity, thrusterWorldPose } from "./thruster";
+import { scaleShapeFloored } from "./tools";
 import {
 	cleanPolygon,
 	completeDecomposition,
@@ -1028,6 +1029,46 @@ export class PhysicsWorld {
 		// melting.ts).
 		if (!flammable) this.burning.delete(id);
 		if (!melting) this.meltHeat.delete(id);
+		body.recomputeMassPropertiesFromColliders();
+		return true;
+	}
+
+	/**
+	 * Shape-scale op (the transform gizmo): scale a body from its
+	 * drag-start shape+pose by `factor` around the world point `(centerX,
+	 * centerY)` — uniform on the shape, the position moves toward/away from
+	 * the center by the APPLIED factor (the degenerate-shape floor may shrink
+	 * it; see {@link scaleShapeFloored}). The document entity's shape and
+	 * transform update in place and the EXISTING Rapier body's colliders are
+	 * rebuilt for the new geometry (the setBodyMaterial in-place pattern: no
+	 * removal, no respawn — the body keeps its identity, so selection, live
+	 * transform, velocity, and attached joints all survive) with mass
+	 * properties recomputed from the new colliders. Wakes the body. False
+	 * when the id is unknown or not a body.
+	 */
+	scaleBodyFrom(
+		id: DocumentId,
+		base: { shape: BodyShape; x: number; y: number },
+		factor: number,
+		centerX: number,
+		centerY: number,
+	): boolean {
+		const entity = this.doc.get(id);
+		if (entity?.kind !== "body") return false;
+		const floored = scaleShapeFloored(base.shape, factor);
+		const x = centerX + (base.x - centerX) * floored.factor;
+		const y = centerY + (base.y - centerY) * floored.factor;
+		this.doc.setBodyShape(id, floored.shape);
+		this.doc.setTransform(id, x, y, entity.rot);
+		const body = this.bodies.get(id);
+		if (!body) return true;
+		body.setTranslation({ x, y }, true);
+		const material = this.doc.material(entity.materialId);
+		for (let i = body.numColliders() - 1; i >= 0; i--) {
+			const collider = body.collider(i);
+			if (collider) this.world.removeCollider(collider, true);
+		}
+		this.attachShape(body, floored.shape, material);
 		body.recomputeMassPropertiesFromColliders();
 		return true;
 	}

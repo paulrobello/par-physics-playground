@@ -324,6 +324,19 @@ export class SceneDocument {
 		return true;
 	}
 
+	/**
+	 * Replace a body's shape; false when unknown or not a body. Entities are
+	 * immutable records, so this replaces the stored entity (the
+	 * setBodyMaterial pattern). The gizmo's scale op writes through this; the
+	 * shape stays valid (the caller owns the degenerate-shape floor).
+	 */
+	setBodyShape(id: DocumentId, shape: BodyShape): boolean {
+		const entity = this.entities.get(id);
+		if (entity?.kind !== "body") return false;
+		this.entities.set(id, { ...entity, shape });
+		return true;
+	}
+
 	ids(): DocumentId[] {
 		return [...this.entities.keys()];
 	}

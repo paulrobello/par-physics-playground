@@ -10,6 +10,15 @@
 
 import type { Camera } from "./lib/camera";
 import type { LabelFont, LabelTextAlign } from "./lib/document";
+import {
+	GIZMO_CORNER_HALF_PX,
+	GIZMO_RING_RADIUS_PX,
+	type GizmoGeom,
+	gizmoCornerX,
+	gizmoCornerY,
+	gizmoRingX,
+	gizmoRingY,
+} from "./lib/gizmo";
 import type { JointType } from "./lib/joint";
 import { jointGlyphRadius } from "./lib/joint";
 import {
@@ -126,6 +135,12 @@ export interface SceneView {
 		halfWidth: number;
 		halfHeight: number;
 	} | null;
+	/**
+	 * Transform gizmo over the selection's combined world AABB, or null when
+	 * hidden (no select tool, no selected body). The renderer draws the
+	 * corner handles, the rotate ring, and the faint box outline from it.
+	 */
+	gizmo(): GizmoGeom | null;
 }
 
 export interface Renderer {
@@ -554,6 +569,53 @@ export function createRenderer(
 			}
 		}
 		if (selectedIds.size > 0) drawSelectionOutlines(selectedIds, zoom);
+		drawGizmo(zoom);
+	}
+
+	/**
+	 * Transform gizmo (the transform-gizmo card): a faint outline over the
+	 * selection's combined bounds, square CORNER handles (scale), and a ring
+	 * handle above the top edge (rotate) — all screen-constant (every length
+	 * ÷ zoom), drawn flat (no shadow — PRD R2: glow is a selection
+	 * affordance, and the outlines already carry it) above the selection
+	 * outlines. All math comes from gizmo.ts so the drawn handles ARE the
+	 * hitboxes; numbers only — the per-frame draw allocates nothing.
+	 */
+	function drawGizmo(zoom: number): void {
+		const scene = options.scene;
+		if (!scene) return;
+		const g = scene.gizmo();
+		if (!g) return;
+		ctx.save();
+		ctx.strokeStyle = ACCENT_COLOR;
+		ctx.lineWidth = 1 / zoom;
+		ctx.globalAlpha = 0.55;
+		ctx.strokeRect(g.minX, g.minY, g.maxX - g.minX, g.maxY - g.minY);
+		ctx.globalAlpha = 1;
+		// Corner handles: filled accent squares, centered on the box corners.
+		const half = GIZMO_CORNER_HALF_PX / zoom;
+		ctx.fillStyle = ACCENT_COLOR;
+		for (let i = 0; i < 4; i++) {
+			ctx.fillRect(
+				gizmoCornerX(g, i) - half,
+				gizmoCornerY(g, i) - half,
+				half * 2,
+				half * 2,
+			);
+		}
+		// Rotate ring above the top edge: stroked circle + center dot.
+		const rx = gizmoRingX(g);
+		const ry = gizmoRingY(g);
+		const r = GIZMO_RING_RADIUS_PX / zoom;
+		ctx.lineWidth = 1.5 / zoom;
+		ctx.beginPath();
+		ctx.arc(rx, ry, r, 0, Math.PI * 2);
+		ctx.stroke();
+		ctx.fillStyle = ACCENT_COLOR;
+		ctx.beginPath();
+		ctx.arc(rx, ry, 1.5 / zoom, 0, Math.PI * 2);
+		ctx.fill();
+		ctx.restore();
 	}
 
 	/** Trace any body shape's closed path (caller begins/ends the path). */

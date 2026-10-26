@@ -12,6 +12,19 @@ import {
 	type FreehandDecision,
 	FreehandStrokeBuilder,
 } from "./freehand";
+import {
+	type GizmoGeom,
+	type GizmoHit,
+	gizmoCenterX,
+	gizmoCenterY,
+	gizmoCornerX,
+	gizmoCornerY,
+	gizmoHitTest,
+	gizmoRingX,
+	gizmoRingY,
+	gizmoRotateDelta,
+	gizmoScaleFactor,
+} from "./gizmo";
 import { jointPickRadius, type PlaceableJointKind } from "./joint";
 import { showNotice } from "./notice";
 import { THRUSTER_AIM_MIN_DRAG } from "./thruster";
@@ -105,6 +118,49 @@ export const MIN_SHAPE_HALF_SIZE = 0.5;
  * {@link MIN_SHAPE_HALF_SIZE}.
  */
 export const MIN_SPAWN_HALF_SIZE = 4;
+
+/**
+ * A shape scaled by `factor` with the gizmo's degenerate-shape floor: the
+ * result's largest half-extent never drops below {@link MIN_SHAPE_HALF_SIZE}.
+ * The APPLIED factor shrinks to the floor (a 0.01 drag on a tiny polygon
+ * applies 0.1 so the shape stays graspable); the caller must scale the body's
+ * position with the APPLIED factor, not the requested one. Pure so the world
+ * op and the tests share one implementation.
+ */
+export function scaleShapeFloored(
+	shape: BodyShape,
+	factor: number,
+): { shape: BodyShape; factor: number } {
+	const maxHalf = ((): number => {
+		if (shape.kind === "box") {
+			return Math.max(shape.halfWidth, shape.halfHeight);
+		}
+		if (shape.kind === "circle") return shape.radius;
+		let max = 0;
+		for (const p of shape.points) {
+			max = Math.max(max, Math.abs(p.x), Math.abs(p.y));
+		}
+		return max;
+	})();
+	const floor = maxHalf > 0 ? MIN_SHAPE_HALF_SIZE / maxHalf : 1;
+	const applied = Math.max(factor, floor);
+	const scaled = (f: number): BodyShape => {
+		if (shape.kind === "box") {
+			return {
+				kind: "box",
+				halfWidth: shape.halfWidth * f,
+				halfHeight: shape.halfHeight * f,
+			};
+		}
+		if (shape.kind === "circle")
+			return { kind: "circle", radius: shape.radius * f };
+		return {
+			kind: "polygon",
+			points: shape.points.map((p) => ({ x: p.x * f, y: p.y * f })),
+		};
+	};
+	return { shape: scaled(applied), factor: applied };
+}
 
 /**
  * Line/beam thickness: the beam is a thin rotated box (half-extent across the
@@ -779,6 +835,28 @@ export interface ToolSessionEvents {
 	 * first (see {@link pickAllBodies}).
 	 */
 	pickAllBodies?(wx: number, wy: number): string[];
+	/**
+	 * Transform gizmo (select tool): the current selection's combined-bounds
+	 * geometry, or null when no gizmo shows (no selected body). Read at press
+	 * time for handle hit-testing; the app resolves it from the live world.
+	 */
+	gizmoGeom?(): GizmoGeom | null;
+	/**
+	 * A gizmo corner-drag started on the selection: the events layer captures
+	 * the base shapes + positions now, ONE undo action for the whole drag.
+	 */
+	onGizmoScaleStart?(): void;
+	/**
+	 * The corner drag's uniform scale factor (relative to drag start) applied
+	 * around the box center — the same apply path as the rotate field, so the
+	 * gesture and the world can never drift.
+	 */
+	onGizmoScale?(factor: number, centerX: number, centerY: number): void;
+	/**
+	 * The gizmo scale drag ended (release, cancel, or tool switch): records
+	 * the undo action (a no-op dedupes in the stack — never a snapshot drop).
+	 */
+	onGizmoScaleEnd?(): void;
 }
 
 type Phase =
@@ -829,6 +907,37 @@ type Phase =
 			velocity: number;
 			lastY: number;
 			lastTime: number;
+	  }
+	| {
+			/**
+			 * Transform gizmo corner drag: the pointer grabbed a corner handle;
+			 * dragging scales the selection (uniform, opposite corner anchored).
+			 */
+			readonly kind: "gizmo-scaling";
+			readonly corner: number;
+			/** Drag-start corner position (world). */
+			readonly cx0: number;
+			readonly cy0: number;
+			/** The anchored opposite corner (world). */
+			readonly ax: number;
+			readonly ay: number;
+			/** The selection-box center at drag start (the scale pivot). */
+			readonly centerX: number;
+			readonly centerY: number;
+	  }
+	| {
+			/**
+			 * Transform gizmo ring drag: the pointer grabbed the rotate handle
+			 * above the selection; dragging sweeps the selection's rotation by
+			 * the SAME base+delta apply path the R-drag gesture uses.
+			 */
+			readonly kind: "gizmo-rotating";
+			/** The selection-box center (the ring's pivot, world). */
+			readonly cx: number;
+			readonly cy: number;
+			/** Drag start point (world). */
+			readonly sx: number;
+			readonly sy: number;
 	  }
 	| {
 			readonly kind: "joint-arming";
@@ -1165,6 +1274,8 @@ export class ToolSession {
 		// commits instead: typed text is not a gesture to discard.
 		if (this.phase.kind === "dragging") this.events.onDragEnd();
 		if (this.phase.kind === "rotating") this.events.onRotateEnd();
+		if (this.phase.kind === "gizmo-scaling") this.events.onGizmoScaleEnd?.();
+		if (this.phase.kind === "gizmo-rotating") this.events.onRotateEnd();
 		if (this.phase.kind === "text-editing") this.commitText();
 		if (this.phase.kind === "thruster-aim") {
 			// The mount is KEPT: commit the aim as-is (null keeps the placed
@@ -1188,6 +1299,8 @@ export class ToolSession {
 	cancel(): void {
 		if (this.phase.kind === "dragging") this.events.onDragEnd();
 		if (this.phase.kind === "rotating") this.events.onRotateEnd();
+		if (this.phase.kind === "gizmo-scaling") this.events.onGizmoScaleEnd?.();
+		if (this.phase.kind === "gizmo-rotating") this.events.onRotateEnd();
 		if (this.phase.kind === "text-editing") this.commitText();
 		if (this.phase.kind === "thruster-aim") {
 			// Mount kept, aim committed as-is (see setTool) — no snapshot drop.
@@ -1264,7 +1377,12 @@ export class ToolSession {
 
 	/** Delete the selection; false when nothing is selected. */ requestDelete(): boolean {
 		if (this.selectedIds.size === 0) return false;
-		if (this.phase.kind === "dragging" || this.phase.kind === "rotating")
+		if (
+			this.phase.kind === "dragging" ||
+			this.phase.kind === "rotating" ||
+			this.phase.kind === "gizmo-scaling" ||
+			this.phase.kind === "gizmo-rotating"
+		)
 			this.cancel();
 		const ids = [...this.selectedIds];
 		this.selectedIds.clear();
@@ -1688,6 +1806,43 @@ export class ToolSession {
 			};
 			return;
 		}
+		// Transform gizmo (select tool): a press on a corner handle scales the
+		// selection (uniform, opposite corner anchored), a press on the ring
+		// rotates it by the same base+delta path as the R-drag gesture. Shift
+		// keeps its select meaning (a handle press must not toggle membership)
+		// and the R modifier keeps the in-place rotate gesture.
+		if (this.selectedIds.size > 0 && !mods.shift && !mods.rotate) {
+			const geom = this.events.gizmoGeom?.();
+			if (geom) {
+				const handle = gizmoHitTest(geom, wx, wy);
+				if (handle) {
+					if (handle.kind === "rotate") {
+						this.phase = {
+							kind: "gizmo-rotating",
+							cx: gizmoCenterX(geom),
+							cy: gizmoCenterY(geom),
+							sx: wx,
+							sy: wy,
+						};
+						this.events.onRotateStart();
+						return;
+					}
+					const i = handle.index;
+					this.phase = {
+						kind: "gizmo-scaling",
+						corner: i,
+						cx0: gizmoCornerX(geom, i),
+						cy0: gizmoCornerY(geom, i),
+						ax: gizmoCornerX(geom, (i + 2) % 4),
+						ay: gizmoCornerY(geom, (i + 2) % 4),
+						centerX: gizmoCenterX(geom),
+						centerY: gizmoCenterY(geom),
+					};
+					this.events.onGizmoScaleStart?.();
+					return;
+				}
+			}
+		}
 		const hit = this.pick(wx, wy);
 		if (hit && mods.rotate) {
 			// R-drag rotates the selection; an unselected body joins it first.
@@ -1745,8 +1900,14 @@ export class ToolSession {
 	): void {
 		if (zoom !== undefined) this.lastZoom = zoom;
 		// Hover tracking runs before the per-phase dispatch: only an active
-		// rotate or drag pins the hover to the pressed body (see hoverId).
-		if (this.phase.kind !== "rotating" && this.phase.kind !== "dragging") {
+		// rotate/drag/gizmo gesture pins the hover to the pressed target (see
+		// hoverId — moves over other bodies must not steal it mid-gesture).
+		if (
+			this.phase.kind !== "rotating" &&
+			this.phase.kind !== "dragging" &&
+			this.phase.kind !== "gizmo-scaling" &&
+			this.phase.kind !== "gizmo-rotating"
+		) {
 			this.hoverId = this.pick(wx, wy);
 		}
 		if (this.phase.kind === "drawing") {
@@ -1800,6 +1961,34 @@ export class ToolSession {
 			} else {
 				this.phase.stroke.add(wx, wy);
 			}
+			return;
+		}
+		if (this.phase.kind === "gizmo-scaling") {
+			this.events.onGizmoScale?.(
+				gizmoScaleFactor(
+					this.phase.cx0,
+					this.phase.cy0,
+					this.phase.ax,
+					this.phase.ay,
+					wx,
+					wy,
+				),
+				this.phase.centerX,
+				this.phase.centerY,
+			);
+			return;
+		}
+		if (this.phase.kind === "gizmo-rotating") {
+			this.events.onRotate(
+				gizmoRotateDelta(
+					this.phase.cx,
+					this.phase.cy,
+					this.phase.sx,
+					this.phase.sy,
+					wx,
+					wy,
+				),
+			);
 			return;
 		}
 		if (this.phase.kind === "rotating") {
@@ -1902,6 +2091,18 @@ export class ToolSession {
 			this.selectedIds = additive
 				? new Set([...this.selectedIds, ...hits])
 				: new Set(hits);
+			return;
+		}
+		if (this.phase.kind === "gizmo-scaling") {
+			this.phase = { kind: "idle" };
+			// Release commits the scale (a no-op drag dedupes in the stack).
+			this.events.onGizmoScaleEnd?.();
+			return;
+		}
+		if (this.phase.kind === "gizmo-rotating") {
+			this.phase = { kind: "idle" };
+			// No fling from the ring drag — velocity tracking is R-drag's.
+			this.events.onRotateEnd();
 			return;
 		}
 		if (this.phase.kind === "rotating") {
