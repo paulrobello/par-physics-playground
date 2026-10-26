@@ -10,7 +10,11 @@
  * from the frame loop — cheap: it only touches the DOM when the shown joint
  * or its data changes.
  */
-import { JOINT_TYPE_LABELS, type JointParams } from "./joint";
+import {
+	clampMotorVelocity,
+	JOINT_TYPE_LABELS,
+	type JointParams,
+} from "./joint";
 import { clampThrusterDuration, type ThrusterEntity } from "./thruster";
 import type { ToolSession } from "./tools";
 import type { UndoStack } from "./undo";
@@ -155,9 +159,15 @@ export function attachJointPanel(deps: JointPanelDeps): () => void {
 			paramsEl
 				.querySelector<HTMLInputElement>("[data-motor-vel]")
 				?.addEventListener("change", (ev) => {
-					const value = (ev.target as HTMLInputElement).valueAsNumber;
-					if (Number.isFinite(value))
-						applyParams(id, { ...params, targetVelocity: value });
+					const input = ev.target as HTMLInputElement;
+					const value = input.valueAsNumber;
+					if (!Number.isFinite(value)) return;
+					// Clamp through the aliasing ceiling (MOTOR_MAX_VELOCITY's doc
+					// in joint.ts) so a typed 500 rad/s lands in band instead of
+					// corrupting a coupled gear's phase accumulator.
+					const clamped = clampMotorVelocity(value);
+					applyParams(id, { ...params, targetVelocity: clamped });
+					input.value = String(clamped);
 				});
 			paramsEl
 				.querySelector<HTMLInputElement>("[data-motor-torque]")

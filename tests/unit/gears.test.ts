@@ -20,6 +20,7 @@ import { makePlacedJoint } from "../../src/lib/joint";
 import {
 	applySceneFile,
 	buildSceneFile,
+	SCENE_BOUNDS,
 	validateSceneFile,
 } from "../../src/lib/scene-file";
 import { PhysicsWorld } from "../../src/lib/world";
@@ -98,6 +99,36 @@ describe("gear/belt placement", () => {
 		expect(place({ radiusA: 0, radiusB: 10 })).toBeUndefined();
 		expect(place({ radiusA: 10, radiusB: 0 })).toBeUndefined();
 		expect(place({ radiusA: -4, radiusB: 10 })).toBeUndefined();
+	});
+
+	test("refuses a ratio beyond the scene-file bound (placement parity with save validation)", () => {
+		// Scene-file validation caps ratio at (0, SCENE_BOUNDS.maxHalfExtent];
+		// a pair placed beyond it could never pass its own save/reload, so
+		// placement refuses up front (undefined → the tool's standard refusal
+		// notice, like every other gear placement guard).
+		const place = (radii: { radiusA: number; radiusB: number }) =>
+			makePlacedJoint(
+				"j",
+				"gear",
+				"a",
+				"b",
+				{ x: 0, y: 0 },
+				{ x: 60, y: 0 },
+				TA,
+				TB,
+				undefined,
+				radii,
+			);
+		expect(
+			place({ radiusA: 20, radiusB: 20 / (SCENE_BOUNDS.maxHalfExtent + 1) }),
+		).toBeUndefined();
+		expect(
+			place({ radiusA: SCENE_BOUNDS.maxHalfExtent + 1, radiusB: 1 }),
+		).toBeUndefined();
+		// Exactly at the bound still places.
+		expect(
+			place({ radiusA: 20, radiusB: 20 / SCENE_BOUNDS.maxHalfExtent }),
+		).toBeDefined();
 	});
 
 	test("refuses without a second body (belt between a body and the world is meaningless)", () => {

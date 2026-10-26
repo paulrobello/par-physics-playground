@@ -7,8 +7,10 @@
  */
 import { describe, expect, test } from "bun:test";
 import {
+	clampMotorVelocity,
 	MOTOR_DEFAULT_TORQUE,
 	MOTOR_DEFAULT_VELOCITY,
+	MOTOR_MAX_VELOCITY,
 	makeJoint,
 	makePlacedJoint,
 	type PlaceableJointKind,
@@ -258,4 +260,18 @@ describe("motor materialization", () => {
 		expect(net / 2).toBeCloseTo(6, 0);
 		expect(angvel).toBeCloseTo(6, 1);
 	}, 10_000);
+});
+
+describe("motor velocity clamp", () => {
+	test("the panel ceiling clamps both signs; in-band values pass through", () => {
+		expect(clampMotorVelocity(1e9)).toBe(MOTOR_MAX_VELOCITY);
+		expect(clampMotorVelocity(-1e9)).toBe(-MOTOR_MAX_VELOCITY);
+		expect(clampMotorVelocity(MOTOR_DEFAULT_VELOCITY)).toBe(
+			MOTOR_DEFAULT_VELOCITY,
+		);
+		expect(clampMotorVelocity(-250)).toBe(-MOTOR_MAX_VELOCITY);
+		expect(clampMotorVelocity(MOTOR_MAX_VELOCITY)).toBe(MOTOR_MAX_VELOCITY);
+		// Non-finite input never becomes a NaN param (reads as 0).
+		expect(clampMotorVelocity(Number.NaN)).toBe(0);
+	});
 });

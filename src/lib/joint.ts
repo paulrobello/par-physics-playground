@@ -22,6 +22,7 @@
  */
 import type RAPIER from "@dimforge/rapier2d-compat";
 import type { BodyShape } from "./document";
+import { SCENE_BOUNDS } from "./scene-file";
 import type { Vec2 } from "./triangulate";
 import type { DocumentId } from "./world";
 
@@ -161,10 +162,15 @@ export type JointParams =
 			 */
 			readonly ratio: number;
 			/**
-			 * Each circle's rotation (radians) at placement — the phase anchor
-			 * the per-tick solve holds (drawn teeth stay meshed). The live
-			 * deviation is accumulated from Rapier's wrapped `rotation()` reads
-			 * in the world walk (see src/lib/gears.ts).
+			 * Each circle's rotation (radians) at placement — provenance for the
+			 * placed configuration (assembly stamping carries it along). The
+			 * per-tick solve does NOT hold these values: the world (re)anchors
+			 * at the rotations the bodies have when the joint is built —
+			 * spawnJoint starts the gear-phase accumulator at zero delta — so a
+			 * rebuilt or restored pair continues from its current orientation
+			 * instead of snapping back to the placement phases. The live
+			 * deviation accumulates from Rapier's wrapped `rotation()` reads in
+			 * the world walk (see src/lib/gears.ts).
 			 */
 			readonly phaseA: number;
 			readonly phaseB: number;
@@ -252,6 +258,28 @@ export const MOTOR_DEFAULT_TORQUE = 1_000_000;
  * ringing). Pinned in tests/unit/joint-motor.test.ts.
  */
 export const MOTOR_VELOCITY_FACTOR = 20;
+
+/**
+ * Panel ceiling for a motor's target velocity (rad/s), enforced by
+ * {@link clampMotorVelocity}. The gear/belt phase accumulator sums per-tick
+ * rotation deltas re-wrapped through `wrapAngleDelta` (±π): at the fixed
+ * tick (1/60 s) any spin faster than π·60 ≈ 188.5 rad/s aliases — the true
+ * per-tick delta exceeds half a revolution, so the accumulator records the
+ * wrapped remainder and the arc-length constraint's bias term runs on a
+ * corrupted error. 180 keeps a margin below that ceiling.
+ */
+export const MOTOR_MAX_VELOCITY = 180;
+
+/**
+ * Clamp a motor target velocity to ±{@link MOTOR_MAX_VELOCITY} (the
+ * gear-phase aliasing ceiling above); non-finite input reads as 0 (never
+ * NaN). The panel's target-velocity field normalizes every edit through
+ * this, mirroring the thruster-duration clamp.
+ */
+export function clampMotorVelocity(raw: number): number {
+	if (!Number.isFinite(raw)) return 0;
+	return Math.min(Math.max(raw, -MOTOR_MAX_VELOCITY), MOTOR_MAX_VELOCITY);
+}
 
 /**
  * The joint types the placement tool offers (P4-T2 passive kinds + the P4-T3
@@ -598,7 +626,12 @@ export function makePlacedJoint(
 			// the circles' radius ratio captured at placement, and the phases
 			// anchor the solve to the placed orientations. The caller carries
 			// `radii` only when both clicks landed on circles — a missing or
-			// non-positive record is the refused non-circle path.
+			// non-positive record is the refused non-circle path. The ratio
+			// must also fit the scene-file validation bound
+			// (0, SCENE_BOUNDS.maxHalfExtent] — placement parity, so every
+			// placeable pair survives its own save/reload validation; the
+			// refusal rides the same undefined → standard-notice path as the
+			// other gear guards.
 			const rA = radii?.radiusA;
 			const rB = radii?.radiusB;
 			if (
@@ -610,7 +643,8 @@ export function makePlacedJoint(
 				!Number.isFinite(rA) ||
 				!Number.isFinite(rB) ||
 				rA <= 0 ||
-				rB <= 0
+				rB <= 0 ||
+				rA / rB > SCENE_BOUNDS.maxHalfExtent
 			) {
 				return undefined;
 			}
