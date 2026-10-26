@@ -245,6 +245,9 @@ output {
 	color: var(--hud-text-secondary);
 	cursor: pointer;
 	user-select: none;
+	/* The bar scrolls horizontally when narrow — a squeezed label must wrap
+	   never ("X-Ray" reads as two rows). */
+	white-space: nowrap;
 }
 
 .header-toggle input[type="checkbox"] {

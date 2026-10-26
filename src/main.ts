@@ -683,6 +683,18 @@ void (async () => {
 	if (debugEnabled) simClock.setPaused(true);
 	const topBar = document.querySelector<HTMLElement>("#top-bar");
 	if (!topBar) throw new Error("#top-bar missing from index.html");
+	// The header scrolls horizontally when narrow, but a vertical wheel
+	// doesn't move a horizontal scroller — translate deltaY into scrollLeft
+	// (only while the bar actually overflows, so a short bar stays inert).
+	topBar.addEventListener(
+		"wheel",
+		(e) => {
+			if (topBar.scrollWidth <= topBar.clientWidth) return;
+			e.preventDefault();
+			topBar.scrollLeft += e.deltaY + e.deltaX;
+		},
+		{ passive: false },
+	);
 	// Header draw options (grid/snap/center/square/angle-snap): plain session
 	// fields + the renderer's grid spacing; persistence restores via the
 	// handle and saves every change.
