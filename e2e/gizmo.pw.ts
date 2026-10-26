@@ -223,3 +223,246 @@ test("a handle drag mid-run keeps the sim alive and scales", async ({
 	// No page errors while the sim ran through the handle drag.
 	expect(errors).toEqual([]);
 });
+
+test("the Uniform toggle flips corner-drag scaling to axis-aligned", async ({
+	page,
+}) => {
+	const errors: string[] = [];
+	page.on("pageerror", (err) => errors.push(String(err)));
+
+	await page.goto("/?debug=1");
+	await page.waitForFunction(() => window.__ppg !== undefined);
+
+	const stage = page.locator("#stage");
+	const stageBox = await stage.boundingBox();
+	if (!stageBox) throw new Error("stage canvas not visible");
+
+	const call = <T>(body: string): Promise<T> =>
+		page.evaluate(
+			`(function(){ const ppg = window.__ppg; if (!ppg) throw new Error("debug api missing"); return (${body}); })()`,
+		) as Promise<T>;
+
+	// A static box (poses stay put while the sim runs, so the handle math
+	// below stays exact).
+	await page.evaluate(() => {
+		const ppg = window.__ppg;
+		if (!ppg) throw new Error("debug api missing");
+		ppg.spawnBox("a", 300, -300, 20, 20, undefined, true);
+	});
+
+	await page.keyboard.press("v");
+	const aPos = await call<{ x: number; y: number }>("ppg.bodyPosition('a')");
+	if (!aPos) throw new Error("box a missing");
+	const cam = await call<{
+		zoom: number;
+		offsetX: number;
+		offsetY: number;
+	}>("ppg.cameraState()");
+	const at = (wx: number, wy: number): { x: number; y: number } => ({
+		x: stageBox.x + wx * cam.zoom + cam.offsetX,
+		y: stageBox.y + wy * cam.zoom + cam.offsetY,
+	});
+
+	await page.mouse.click(at(aPos.x, aPos.y).x, at(aPos.x, aPos.y).y);
+	await expect.poll(() => call<string[]>("ppg.selectedIds()")).toContain("a");
+
+	// Uniform OFF: the corner drag measures each axis against the anchored
+	// opposite corner — sx 2 / sy 1 scales the width independently while the
+	// height stays.
+	await page.locator('[data-draw="uniform-scale"]').uncheck();
+
+	// TL corner (280,−320), anchored at BR (320,−280): a pointer at
+	// (240,−320) gives sx (240−320)/(280−320) = 2 and sy 1 (halfWidth
+	// 20 → 40, halfHeight 20 stays).
+	const tl = at(aPos.x - 20, aPos.y - 20);
+	const target = at(aPos.x - 60, aPos.y - 20);
+	await page.mouse.move(tl.x, tl.y);
+	await page.mouse.down();
+	await page.mouse.move(target.x, target.y, { steps: 4 });
+	await page.mouse.up();
+	const shape = await call<{
+		kind: string;
+		halfWidth: number;
+		halfHeight: number;
+	}>("ppg.bodyShape('a')");
+	if (!shape || shape.kind !== "box") throw new Error("box shape missing");
+	expect(shape.halfWidth).toBeCloseTo(40, 0);
+	expect(shape.halfHeight).toBeCloseTo(20, 0);
+
+	expect(errors).toEqual([]);
+});
+
+test("the rotation arc readout rides a ring drag (and only a ring drag)", async ({
+	page,
+}) => {
+	const errors: string[] = [];
+	page.on("pageerror", (err) => errors.push(String(err)));
+
+	await page.goto("/?debug=1");
+	await page.waitForFunction(() => window.__ppg !== undefined);
+
+	const stage = page.locator("#stage");
+	const stageBox = await stage.boundingBox();
+	if (!stageBox) throw new Error("stage canvas not visible");
+
+	const call = <T>(body: string): Promise<T> =>
+		page.evaluate(
+			`(function(){ const ppg = window.__ppg; if (!ppg) throw new Error("debug api missing"); return (${body}); })()`,
+		) as Promise<T>;
+
+	// A static box (poses stay put, so the ring/angle math below stays exact).
+	await page.evaluate(() => {
+		const ppg = window.__ppg;
+		if (!ppg) throw new Error("debug api missing");
+		ppg.spawnBox("a", 300, -300, 20, 20, undefined, true);
+	});
+
+	await page.keyboard.press("v");
+	const aPos = await call<{ x: number; y: number }>("ppg.bodyPosition('a')");
+	if (!aPos) throw new Error("box a missing");
+	const cam = await call<{
+		zoom: number;
+		offsetX: number;
+		offsetY: number;
+	}>("ppg.cameraState()");
+	const at = (wx: number, wy: number): { x: number; y: number } => ({
+		x: stageBox.x + wx * cam.zoom + cam.offsetX,
+		y: stageBox.y + wy * cam.zoom + cam.offsetY,
+	});
+
+	await page.mouse.click(at(aPos.x, aPos.y).x, at(aPos.x, aPos.y).y);
+	await expect.poll(() => call<string[]>("ppg.selectedIds()")).toContain("a");
+
+	// No live arc state outside an active ring drag.
+	expect(await call("ppg.gizmoRotation()")).toBeNull();
+
+	// Ring drag: the ring hangs 8px above the top edge (−320); the press
+	// angle is due north of the box center (y-down: −π/2). Sweeping to due
+	// east of the center makes the current angle 0. Polls: input events may
+	// deliver a frame behind the CDP dispatch on a loaded host.
+	const ring = at(aPos.x, aPos.y - 20 - 8 / cam.zoom);
+	const east = at(aPos.x + 40, aPos.y);
+	await page.mouse.move(ring.x, ring.y);
+	await page.mouse.down();
+	await page.mouse.move(east.x, east.y, { steps: 4 });
+	await expect
+		.poll(async () => {
+			const rot = await call<{
+				cx: number;
+				cy: number;
+				start: number;
+				current: number;
+			} | null>("ppg.gizmoRotation()");
+			if (!rot) return null;
+			return [rot.cx, rot.cy, rot.start, rot.current];
+		})
+		.toEqual([
+			expect.closeTo(aPos.x, 3),
+			expect.closeTo(aPos.y, 3),
+			expect.closeTo(-Math.PI / 2, 3),
+			expect.closeTo(0, 3),
+		]);
+	await page.mouse.up();
+
+	// The arc state clears on release.
+	await expect.poll(() => call("ppg.gizmoRotation()")).toBeNull();
+
+	// R-drag (mods.rotate) rotates each body about its own center — it must
+	// NOT produce arc state.
+	await page.keyboard.down("r");
+	const body = at(aPos.x, aPos.y);
+	await page.mouse.move(body.x, body.y);
+	await page.mouse.down();
+	await page.mouse.move(body.x + 30, body.y, { steps: 2 });
+	expect(await call("ppg.gizmoRotation()")).toBeNull();
+	await page.mouse.up();
+	await page.keyboard.up("r");
+
+	expect(errors).toEqual([]);
+});
+
+test("shift mid-drag locks the move to the drag's dominant axis", async ({
+	page,
+}) => {
+	const errors: string[] = [];
+	page.on("pageerror", (err) => errors.push(String(err)));
+
+	await page.goto("/?debug=1");
+	await page.waitForFunction(() => window.__ppg !== undefined);
+
+	const stage = page.locator("#stage");
+	const stageBox = await stage.boundingBox();
+	if (!stageBox) throw new Error("stage canvas not visible");
+
+	const call = <T>(body: string): Promise<T> =>
+		page.evaluate(
+			`(function(){ const ppg = window.__ppg; if (!ppg) throw new Error("debug api missing"); return (${body}); })()`,
+		) as Promise<T>;
+
+	// A dynamic box — the drag teleports it (moveBody), which works paused
+	// (debug mode boots paused).
+	await page.evaluate(() => {
+		const ppg = window.__ppg;
+		if (!ppg) throw new Error("debug api missing");
+		ppg.spawnBox("m", 300, -300, 20, 20);
+	});
+
+	await page.keyboard.press("v");
+	const mPos = await call<{ x: number; y: number }>("ppg.bodyPosition('m')");
+	if (!mPos) throw new Error("box m missing");
+	const cam = await call<{
+		zoom: number;
+		offsetX: number;
+		offsetY: number;
+	}>("ppg.cameraState()");
+	const at = (wx: number, wy: number): { x: number; y: number } => ({
+		x: stageBox.x + wx * cam.zoom + cam.offsetX,
+		y: stageBox.y + wy * cam.zoom + cam.offsetY,
+	});
+
+	// Press on the body (a plain press starts the drag), THEN hold Shift:
+	// the lock is a mid-drag modifier, not a click semantics change.
+	const press = at(mPos.x, mPos.y);
+	await page.mouse.move(press.x, press.y);
+	await page.mouse.down();
+	await page.keyboard.down("Shift");
+
+	// Diagonal move (dx 40, dy −30 → |dx| > |dy|): the x keeps the pointer,
+	// the y locks back to the press y. Polls: input events may deliver a
+	// frame behind the CDP dispatch on a loaded host, so the read retries
+	// until every move of the gesture has landed (the pointer stays down).
+	const locked = at(mPos.x + 40, mPos.y - 30);
+	await page.mouse.move(locked.x, locked.y, { steps: 4 });
+	await expect
+		.poll(async () => {
+			const held = await call<{ x: number; y: number }>(
+				"ppg.bodyPosition('m')",
+			);
+			if (!held) throw new Error("box m missing mid-drag");
+			return { x: held.x, y: held.y };
+		})
+		.toEqual({
+			x: expect.closeTo(mPos.x + 40, 3),
+			y: expect.closeTo(mPos.y, 3),
+		});
+
+	// Releasing Shift mid-drag drops the lock: the next move is free.
+	await page.keyboard.up("Shift");
+	const free = at(mPos.x + 50, mPos.y - 50);
+	await page.mouse.move(free.x, free.y, { steps: 4 });
+	await expect
+		.poll(async () => {
+			const freed = await call<{ x: number; y: number }>(
+				"ppg.bodyPosition('m')",
+			);
+			if (!freed) throw new Error("box m missing after unlock");
+			return { x: freed.x, y: freed.y };
+		})
+		.toEqual({
+			x: expect.closeTo(mPos.x + 50, 3),
+			y: expect.closeTo(mPos.y - 50, 3),
+		});
+
+	await page.mouse.up();
+	expect(errors).toEqual([]);
+});

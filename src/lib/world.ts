@@ -40,7 +40,7 @@ import { MATERIAL_DEFAULT_ID } from "./material";
 import { isMeltedThrough, MELT_SECONDS, meltRenderScale } from "./melting";
 import { PULLEY_MIN_LEG, solvePulleyImpulse } from "./pulley";
 import { type ThrusterEntity, thrusterWorldPose } from "./thruster";
-import { scaleShapeFloored } from "./tools";
+import { scaleShapeAxesFloored, scaleShapeFloored } from "./tools";
 import {
 	cleanPolygon,
 	completeDecomposition,
@@ -1058,6 +1058,45 @@ export class PhysicsWorld {
 		const floored = scaleShapeFloored(base.shape, factor);
 		const x = centerX + (base.x - centerX) * floored.factor;
 		const y = centerY + (base.y - centerY) * floored.factor;
+		this.doc.setBodyShape(id, floored.shape);
+		this.doc.setTransform(id, x, y, entity.rot);
+		const body = this.bodies.get(id);
+		if (!body) return true;
+		body.setTranslation({ x, y }, true);
+		const material = this.doc.material(entity.materialId);
+		for (let i = body.numColliders() - 1; i >= 0; i--) {
+			const collider = body.collider(i);
+			if (collider) this.world.removeCollider(collider, true);
+		}
+		this.attachShape(body, floored.shape, material);
+		body.recomputeMassPropertiesFromColliders();
+		return true;
+	}
+
+	/**
+	 * Shape-scale op (the transform gizmo, axis-aligned mode): like
+	 * {@link scaleBodyFrom} but per-axis — sx/sy measured against the fixed
+	 * anchor point `(anchorX, anchorY)` (the gizmo's opposite corner), each
+	 * axis floored at the degenerate-shape minimum (negatives clamp to the
+	 * floor — no mirroring), and circles scale their radius by the dominant
+	 * applied factor while the position still moves per axis. The APPLIED
+	 * per-axis factors govern position. In-place collider rebuild and mass
+	 * recompute exactly like {@link scaleBodyFrom}; false when the id is
+	 * unknown or not a body.
+	 */
+	scaleBodyAxesFrom(
+		id: DocumentId,
+		base: { shape: BodyShape; x: number; y: number },
+		sx: number,
+		sy: number,
+		anchorX: number,
+		anchorY: number,
+	): boolean {
+		const entity = this.doc.get(id);
+		if (entity?.kind !== "body") return false;
+		const floored = scaleShapeAxesFloored(base.shape, sx, sy);
+		const x = anchorX + (base.x - anchorX) * floored.sx;
+		const y = anchorY + (base.y - anchorY) * floored.sy;
 		this.doc.setBodyShape(id, floored.shape);
 		this.doc.setTransform(id, x, y, entity.rot);
 		const body = this.bodies.get(id);

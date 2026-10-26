@@ -693,11 +693,15 @@ export function createToolEvents(
 				});
 			}
 		},
-		onGizmoScale(factor, centerX, centerY) {
+		onGizmoScale(sx, sy, pivotX, pivotY, uniform) {
 			// The floor may shrink the applied factor per body; positions move
 			// by the APPLIED factor so a floored body stays anchored correctly.
 			for (const [id, base] of this.gizmoScaleBase) {
-				world.scaleBodyFrom(id, base, factor, centerX, centerY);
+				if (uniform) {
+					world.scaleBodyFrom(id, base, sx, pivotX, pivotY);
+				} else {
+					world.scaleBodyAxesFrom(id, base, sx, sy, pivotX, pivotY);
+				}
 			}
 		},
 		onGizmoScaleEnd() {

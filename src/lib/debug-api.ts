@@ -6,6 +6,7 @@ import type { Camera, CameraState } from "./camera";
 import type { SimClock } from "./clock";
 import { buildDemoScene } from "./demo-scene";
 import type { BodyShape, DocEntity } from "./document";
+import type { GizmoRotationState } from "./gizmo";
 import type { RopeChainSpawned } from "./interaction";
 import { placeRopeChain } from "./interaction";
 import type { JointEntity, JointParams } from "./joint";
@@ -105,6 +106,12 @@ export interface DebugApi {
 	undoDepth(): { undo: number; redo: number };
 	/** Currently selected body ids (live selection set of the tool session). */
 	selectedIds(): DocumentId[];
+	/**
+	 * Live transform-gizmo ring-drag rotation state (the angle-readout arc):
+	 * the drag's pivot and drag-start/current pointer angles, or null when no
+	 * ring drag is active.
+	 */
+	gizmoRotation(): GizmoRotationState | null;
 	/**
 	 * Place a pin (revolute) joint at world point (x, y) between two bodies,
 	 * or between bodyA and the world when bodyBId is null. Same document path
@@ -330,6 +337,9 @@ export function installDebugApi(
 		},
 		selectedIds() {
 			return [...session.selectedIds];
+		},
+		gizmoRotation() {
+			return session.gizmoRotation();
 		},
 		placePin(id, bodyAId, bodyBId, x, y) {
 			const a = world.bodies.get(bodyAId);

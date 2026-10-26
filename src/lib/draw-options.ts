@@ -22,6 +22,11 @@ export interface DrawOptionValues {
 	 * the bodies it connects.
 	 */
 	jointLines: boolean;
+	/**
+	 * Transform gizmo corner drags scale uniformly when on; axis-aligned
+	 * (per-axis factors against the anchored opposite corner) when off.
+	 */
+	uniformScale: boolean;
 }
 
 export interface DrawOptionsDeps {
@@ -72,6 +77,9 @@ export function attachDrawOptions(deps: DrawOptionsDeps): DrawOptionsHandle {
 	const jointLines = deps.host.querySelector<HTMLInputElement>(
 		'[data-draw="joint-lines"]',
 	);
+	const uniformScale = deps.host.querySelector<HTMLInputElement>(
+		'[data-draw="uniform-scale"]',
+	);
 	if (
 		!gridSize ||
 		!gridSizeOut ||
@@ -80,7 +88,8 @@ export function attachDrawOptions(deps: DrawOptionsDeps): DrawOptionsHandle {
 		!boxSquare ||
 		!angleSnap ||
 		!xRay ||
-		!jointLines
+		!jointLines ||
+		!uniformScale
 	)
 		throw new Error("draw-option controls missing from the top bar");
 
@@ -117,6 +126,10 @@ export function attachDrawOptions(deps: DrawOptionsDeps): DrawOptionsHandle {
 			deps.renderer.jointLines = values.jointLines;
 			jointLines.checked = values.jointLines;
 		}
+		if (values.uniformScale !== undefined) {
+			deps.session.uniformScale = values.uniformScale;
+			uniformScale.checked = values.uniformScale;
+		}
 	};
 
 	/** A user change: apply, then hand the full values to persistence. */
@@ -130,6 +143,7 @@ export function attachDrawOptions(deps: DrawOptionsDeps): DrawOptionsHandle {
 			angleSnap: deps.session.angleSnap,
 			xRay: deps.renderer.xRay,
 			jointLines: deps.renderer.jointLines,
+			uniformScale: deps.session.uniformScale,
 		});
 	};
 
@@ -157,6 +171,9 @@ export function attachDrawOptions(deps: DrawOptionsDeps): DrawOptionsHandle {
 	});
 	jointLines.addEventListener("change", () => {
 		commit({ jointLines: jointLines.checked });
+	});
+	uniformScale.addEventListener("change", () => {
+		commit({ uniformScale: uniformScale.checked });
 	});
 
 	return { apply };

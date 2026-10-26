@@ -428,6 +428,12 @@ const sceneView = {
 	gizmo(): GizmoGeom | null {
 		return selectionGizmo(camera.zoom);
 	},
+	// Live ring-drag rotation state (the angle-readout arc): straight from
+	// the tool session's gizmo-rotating phase (scratch record — the per-frame
+	// read allocates nothing); null outside an active ring drag.
+	gizmoRotation() {
+		return session?.gizmoRotation() ?? null;
+	},
 	hoverId() {
 		return session?.hoverId;
 	},
@@ -712,6 +718,7 @@ void (async () => {
 		angleSnap: settings.angleSnap,
 		xRay: settings.xRay,
 		jointLines: settings.jointLines,
+		uniformScale: settings.uniformScale,
 	});
 	// Bottom status bar: per-tool help + live scene census + FPS toggle.
 	const statusBarEl = document.querySelector<HTMLElement>("#status-bar");

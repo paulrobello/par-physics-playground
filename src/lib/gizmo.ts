@@ -127,6 +127,106 @@ export function gizmoRotateDelta(
 	);
 }
 
+/** Arc radius for the ring-drag angle readout, CSS px (just outside the ring). */
+export const GIZMO_ARC_RADIUS_PX = GIZMO_RING_RADIUS_PX + 6;
+/** The angle label rides this far beyond the arc radius, CSS px. */
+export const GIZMO_ARC_LABEL_PAD_PX = 6;
+/** Angle-readout label font size, CSS px. */
+export const GIZMO_ARC_LABEL_FONT_PX = 11;
+
+/**
+ * Live ring-drag rotation state: the drag's pivot (the selection-box center)
+ * and the drag-start/current pointer angles in the y-down atan2 convention.
+ * The renderer reads it through the scene adapter while a ring drag is active;
+ * the debug API exposes the same record for e2e.
+ */
+export interface GizmoRotationState {
+	readonly cx: number;
+	readonly cy: number;
+	readonly start: number;
+	readonly current: number;
+}
+
+/** Scratch record the per-axis corner-drag factors fill. */
+export interface GizmoScaleAxes {
+	sx: number;
+	sy: number;
+}
+
+/**
+ * Raw per-axis scale factors for a corner drag measured against the anchored
+ * opposite corner: sx = (wx−ax)/(cx0−ax), sy = (wy−ay)/(cy0−ay). A degenerate
+ * start axis (the corner on the anchor) yields 1 — the
+ * {@link gizmoScaleFactor} convention. Writes into `out` (caller owns the
+ * record; the per-move path allocates nothing).
+ */
+export function gizmoScaleAxesFactor(
+	cornerX: number,
+	cornerY: number,
+	anchorX: number,
+	anchorY: number,
+	wx: number,
+	wy: number,
+	out: GizmoScaleAxes,
+): void {
+	const bx = cornerX - anchorX;
+	const by = cornerY - anchorY;
+	out.sx = Math.abs(bx) < 1e-6 ? 1 : (wx - anchorX) / bx;
+	out.sy = Math.abs(by) < 1e-6 ? 1 : (wy - anchorY) / by;
+}
+
+/** Scratch record gizmoArcSweep fills. */
+export interface GizmoArcSweep {
+	startAngle: number;
+	sweep: number;
+}
+
+/**
+ * The ring-drag arc's geometry from the drag-start to the current pointer
+ * angle: the sweep normalizes to (−π, π] so the drawn arc always takes the
+ * short way across the ±π branch. Writes into `out`.
+ */
+export function gizmoArcSweep(
+	start: number,
+	current: number,
+	out: GizmoArcSweep,
+): void {
+	let d = current - start;
+	while (d > Math.PI) d -= Math.PI * 2;
+	while (d <= -Math.PI) d += Math.PI * 2;
+	out.startAngle = start;
+	out.sweep = d;
+}
+
+/** The rotation arc's world radius at this zoom (screen-constant). */
+export function gizmoArcRadius(zoom: number): number {
+	return GIZMO_ARC_RADIUS_PX / zoom;
+}
+
+/**
+ * The angle label's position at the arc's current end, one label pad beyond
+ * the arc radius (world units). Writes into `out`.
+ */
+export function gizmoArcLabelPos(
+	cx: number,
+	cy: number,
+	endAngle: number,
+	zoom: number,
+	out: { x: number; y: number },
+): void {
+	const r = (GIZMO_ARC_RADIUS_PX + GIZMO_ARC_LABEL_PAD_PX) / zoom;
+	out.x = cx + Math.cos(endAngle) * r;
+	out.y = cy + Math.sin(endAngle) * r;
+}
+
+/**
+ * The swept angle as a signed, exactly-one-decimal degrees string ("12.3°").
+ */
+export function formatSweptAngle(sweep: number): string {
+	const deg = (sweep * 180) / Math.PI;
+	return `${deg < 0 ? "-" : ""}${Math.abs(deg).toFixed(1)}°`;
+}
+
 /**
  * Bounds accumulator the per-frame selection walk fills (P5 allocation card:
  * the caller owns the record, the walk allocates nothing).

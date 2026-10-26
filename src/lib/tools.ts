@@ -15,6 +15,7 @@ import {
 import {
 	type GizmoGeom,
 	type GizmoHit,
+	type GizmoRotationState,
 	gizmoCenterX,
 	gizmoCenterY,
 	gizmoCornerX,
@@ -23,6 +24,7 @@ import {
 	gizmoRingX,
 	gizmoRingY,
 	gizmoRotateDelta,
+	gizmoScaleAxesFactor,
 	gizmoScaleFactor,
 } from "./gizmo";
 import { jointPickRadius, type PlaceableJointKind } from "./joint";
@@ -160,6 +162,92 @@ export function scaleShapeFloored(
 		};
 	};
 	return { shape: scaled(applied), factor: applied };
+}
+
+/**
+ * A shape scaled per-axis by (sx, sy) with the gizmo's degenerate-shape floor
+ * PER AXIS: each axis's half-extent never drops below
+ * {@link MIN_SHAPE_HALF_SIZE}, and negative factors clamp to the floor (no
+ * mirroring). Circles have no ellipse kind: the radius takes the dominant
+ * (larger) applied factor while the position still moves per axis. The
+ * APPLIED per-axis factors govern — the caller must move the body's position
+ * with them, not the requested ones. Pure so the world op and the tests share
+ * one implementation.
+ */
+export function scaleShapeAxesFloored(
+	shape: BodyShape,
+	sx: number,
+	sy: number,
+): { shape: BodyShape; sx: number; sy: number } {
+	const floorOf = (ext: number): number =>
+		ext > 0 ? MIN_SHAPE_HALF_SIZE / ext : 1;
+	if (shape.kind === "box") {
+		const ax = Math.max(sx, floorOf(shape.halfWidth));
+		const ay = Math.max(sy, floorOf(shape.halfHeight));
+		return {
+			shape: {
+				kind: "box",
+				halfWidth: shape.halfWidth * ax,
+				halfHeight: shape.halfHeight * ay,
+			},
+			sx: ax,
+			sy: ay,
+		};
+	}
+	if (shape.kind === "circle") {
+		const floor = floorOf(shape.radius);
+		const ax = Math.max(sx, floor);
+		const ay = Math.max(sy, floor);
+		// No ellipse kind: the dominant applied factor governs the radius.
+		const dominant = Math.max(ax, ay);
+		return {
+			shape: { kind: "circle", radius: shape.radius * dominant },
+			sx: ax,
+			sy: ay,
+		};
+	}
+	let maxX = 0;
+	let maxY = 0;
+	for (const p of shape.points) {
+		maxX = Math.max(maxX, Math.abs(p.x));
+		maxY = Math.max(maxY, Math.abs(p.y));
+	}
+	const ax = Math.max(sx, floorOf(maxX));
+	const ay = Math.max(sy, floorOf(maxY));
+	return {
+		shape: {
+			kind: "polygon",
+			points: shape.points.map((p) => ({ x: p.x * ax, y: p.y * ay })),
+		},
+		sx: ax,
+		sy: ay,
+	};
+}
+
+/**
+ * Shift axis-lock (Paul, 2026-10-26): while Shift is held during a body move
+ * drag, the move point locks to the drag's dominant axis — the minor
+ * component of the TOTAL delta zeroes continuously (self-correcting each
+ * move: |dx| >= |dy| keeps x, else keeps y), so pressing/releasing Shift
+ * mid-drag toggles the lock live. Writes into `out` (caller owns the record;
+ * the events layer retains the MOVE POINT it receives, so pass it a copy).
+ */
+export function axisLockMove(
+	startX: number,
+	startY: number,
+	wx: number,
+	wy: number,
+	out: { x: number; y: number },
+): void {
+	const dx = wx - startX;
+	const dy = wy - startY;
+	if (Math.abs(dx) >= Math.abs(dy)) {
+		out.x = wx;
+		out.y = startY;
+	} else {
+		out.x = startX;
+		out.y = wy;
+	}
 }
 
 /**
@@ -847,11 +935,19 @@ export interface ToolSessionEvents {
 	 */
 	onGizmoScaleStart?(): void;
 	/**
-	 * The corner drag's uniform scale factor (relative to drag start) applied
-	 * around the box center — the same apply path as the rotate field, so the
-	 * gesture and the world can never drift.
+	 * The corner drag's requested scale factors (sx, sy) with the fixed pivot
+	 * and the mode: uniform (sx==sy, pivot the box center — the shipped
+	 * path) or axis-aligned (pivot the anchored opposite corner, position
+	 * moves per axis). The world op floors per body, so the APPLIED factors
+	 * there govern position.
 	 */
-	onGizmoScale?(factor: number, centerX: number, centerY: number): void;
+	onGizmoScale?(
+		sx: number,
+		sy: number,
+		pivotX: number,
+		pivotY: number,
+		uniform: boolean,
+	): void;
 	/**
 	 * The gizmo scale drag ended (release, cancel, or tool switch): records
 	 * the undo action (a no-op dedupes in the stack — never a snapshot drop).
@@ -891,7 +987,13 @@ type Phase =
 			readonly anchorY: number;
 			text: string;
 	  }
-	| { readonly kind: "dragging"; id: string }
+	| {
+			readonly kind: "dragging";
+			readonly id: string;
+			/** The press point (world) — the axis lock measures the total delta from it. */
+			readonly startX: number;
+			readonly startY: number;
+	  }
 	| {
 			readonly kind: "rubberband";
 			startX: number;
@@ -938,6 +1040,9 @@ type Phase =
 			/** Drag start point (world). */
 			readonly sx: number;
 			readonly sy: number;
+			/** Latest pointer point (world) — the live angle-readout arc reads it. */
+			curX: number;
+			curY: number;
 	  }
 	| {
 			readonly kind: "joint-arming";
@@ -1037,6 +1142,13 @@ export class ToolSession {
 	circleFromCenter = false;
 	constrainBox = false;
 	angleSnap = false;
+	/**
+	 * Transform gizmo corner drags scale uniformly when on (the shipped
+	 * behavior); axis-aligned when off — per-axis factors against the anchored
+	 * opposite corner, per-axis floors, position per axis (draw option,
+	 * wired in draw-options.ts).
+	 */
+	uniformScale = true;
 
 	/** Pointer sample for the point-based draw tools, snapped when Snap is on. */
 	private snapPoint(wx: number, wy: number): { x: number; y: number } {
@@ -1089,6 +1201,18 @@ export class ToolSession {
 	private phase: Phase = { kind: "idle" };
 	/** Last pointer-event zoom (interaction.ts passes it); sizes screen-constant hitboxes. */
 	private lastZoom = 1;
+	/** Shared scratch records the per-frame/move reads fill (no allocation). */
+	private readonly rotationScratch: {
+		cx: number;
+		cy: number;
+		start: number;
+		current: number;
+	} = { cx: 0, cy: 0, start: 0, current: 0 };
+	private readonly scaleAxesScratch: { sx: number; sy: number } = {
+		sx: 0,
+		sy: 0,
+	};
+	private readonly dragLockScratch = { x: 0, y: 0 };
 
 	constructor(
 		private readonly events: ToolSessionEvents,
@@ -1251,6 +1375,24 @@ export class ToolSession {
 		shift: boolean,
 	): void {
 		this.events.onSpawnLine(this.lineGeom(ax, ay, bx, by, shift));
+	}
+
+	/**
+	 * Live ring-drag rotation state (the renderer's angle-readout arc and the
+	 * debug API): the drag's pivot and the drag-start/current pointer angles,
+	 * or null when no ring drag is active. R-drag never produces it — each
+	 * body rotates about its own center, so no single arc represents that
+	 * gesture. Scratch record only: the per-frame read allocates nothing.
+	 */
+	gizmoRotation(): GizmoRotationState | null {
+		if (this.phase.kind !== "gizmo-rotating") return null;
+		const { cx, cy, sx, sy, curX, curY } = this.phase;
+		const s = this.rotationScratch;
+		s.cx = cx;
+		s.cy = cy;
+		s.start = Math.atan2(sy - cy, sx - cx);
+		s.current = Math.atan2(curY - cy, curX - cx);
+		return s;
 	}
 
 	/** The in-progress rubber-band rectangle, or null when not rubber-banding. */
@@ -1823,6 +1965,8 @@ export class ToolSession {
 							cy: gizmoCenterY(geom),
 							sx: wx,
 							sy: wy,
+							curX: wx,
+							curY: wy,
 						};
 						this.events.onRotateStart();
 						return;
@@ -1888,7 +2032,7 @@ export class ToolSession {
 			};
 			return;
 		}
-		this.phase = { kind: "dragging", id: hit };
+		this.phase = { kind: "dragging", id: hit, startX: wx, startY: wy };
 		this.events.onDragStart(hit, { x: wx, y: wy });
 	}
 
@@ -1964,21 +2108,47 @@ export class ToolSession {
 			return;
 		}
 		if (this.phase.kind === "gizmo-scaling") {
-			this.events.onGizmoScale?.(
-				gizmoScaleFactor(
+			if (this.uniformScale) {
+				// Uniform (the shipped path): one factor, pivot the box center.
+				const f = gizmoScaleFactor(
 					this.phase.cx0,
 					this.phase.cy0,
 					this.phase.ax,
 					this.phase.ay,
 					wx,
 					wy,
-				),
-				this.phase.centerX,
-				this.phase.centerY,
+				);
+				this.events.onGizmoScale?.(
+					f,
+					f,
+					this.phase.centerX,
+					this.phase.centerY,
+					true,
+				);
+				return;
+			}
+			// Axis-aligned: per-axis factors against the anchored opposite
+			// corner, position moving per axis (the applied factors govern).
+			gizmoScaleAxesFactor(
+				this.phase.cx0,
+				this.phase.cy0,
+				this.phase.ax,
+				this.phase.ay,
+				wx,
+				wy,
+				this.scaleAxesScratch,
+			);
+			this.events.onGizmoScale?.(
+				this.scaleAxesScratch.sx,
+				this.scaleAxesScratch.sy,
+				this.phase.ax,
+				this.phase.ay,
+				false,
 			);
 			return;
 		}
 		if (this.phase.kind === "gizmo-rotating") {
+			this.phase = { ...this.phase, curX: wx, curY: wy };
 			this.events.onRotate(
 				gizmoRotateDelta(
 					this.phase.cx,
@@ -2007,7 +2177,23 @@ export class ToolSession {
 			return;
 		}
 		if (this.phase.kind === "dragging") {
-			this.events.onDragMove({ x: wx, y: wy });
+			if (mods.shift) {
+				// Shift axis-lock: the move point locks to the drag's dominant
+				// axis (self-correcting each move — no mods arg means no lock).
+				// The events layer RETAINS the move-point record between moves
+				// (the delta-accumulation grab), so pass a copy — handing it a
+				// reused record would alias the grab and zero every later delta.
+				axisLockMove(
+					this.phase.startX,
+					this.phase.startY,
+					wx,
+					wy,
+					this.dragLockScratch,
+				);
+				this.events.onDragMove({ ...this.dragLockScratch });
+			} else {
+				this.events.onDragMove({ x: wx, y: wy });
+			}
 			return;
 		}
 	}

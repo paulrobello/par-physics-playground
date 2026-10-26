@@ -180,6 +180,40 @@ describe("gizmo scale op (world + events + session)", () => {
 		expect(ra.x).toBeCloseTo(beforeA.x, 4);
 	}, 10_000);
 
+	test("axis-aligned mode scales per axis against the anchored corner", async () => {
+		const world = await PhysicsWorld.create();
+		const events = createToolEvents(world, {
+			selectedIds: () => session.selectedIds,
+		});
+		events.gizmoGeom = boxGeom;
+		let pickableId: string | undefined;
+		const session = new ToolSession(events, () => pickableId);
+		world.spawnBox("a", 0, -300, 10, 5);
+		session.selectedIds = new Set(["a"]);
+		session.uniformScale = false;
+
+		// The body's box [−10,−310]−[10,−290]; the TL corner (−10,−310),
+		// anchored at BR (10,−290): a pointer at (−30,−310) doubles the width
+		// (sx 2) and keeps the height (sy 0 → the floor keeps it at halfH 5).
+		session.pointerDown(-10, -310, {}, 1);
+		session.pointerMove(-30, -310, {}, 1);
+		session.pointerUp(1);
+
+		const e = world.doc.get("a");
+		if (e?.kind !== "body") throw new Error("box a missing");
+		if (e.shape.kind !== "box") throw new Error("shape kind drifted");
+		expect(e.shape.halfWidth).toBe(20);
+		expect(e.shape.halfHeight).toBe(5);
+		// Position pivots on the ANCHOR (10,−290): the dragged corner follows
+		// the pointer — left edge −10 + (−10−10)*2 = −30 — and sy 1 keeps
+		// every y exactly where it was.
+		const p = world.bodyPosition("a");
+		if (!p) throw new Error("body gone after scale");
+		expect(p.x).toBeCloseTo(-10, 4);
+		expect(p.y).toBeCloseTo(-300, 4);
+		expect(p.x - e.shape.halfWidth).toBeCloseTo(-30, 4);
+	}, 10_000);
+
 	test("cancel mid-drag leaves no leaked undo snapshot (the pulley lesson)", async () => {
 		const world = await PhysicsWorld.create();
 		const events = createToolEvents(world, {

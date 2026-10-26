@@ -33,6 +33,8 @@ export interface PersistedSettings {
 	xRay: boolean;
 	/** Joint-lines view: dotted anchor→body-center relationship lines. */
 	jointLines: boolean;
+	/** Uniform gizmo scaling (corner drags); axis-aligned when off. */
+	uniformScale: boolean;
 	/** Active tool. */
 	tool: ToolId;
 }
@@ -63,6 +65,7 @@ export const DEFAULT_SETTINGS: PersistedSettings = {
 	paused: false,
 	xRay: false,
 	jointLines: false,
+	uniformScale: true,
 	tool: "select",
 };
 
@@ -126,6 +129,7 @@ export function loadSettings(storage: SettingsStorage): PersistedSettings {
 		paused: bool(raw.paused, DEFAULT_SETTINGS.paused),
 		xRay: bool(raw.xRay, DEFAULT_SETTINGS.xRay),
 		jointLines: bool(raw.jointLines, DEFAULT_SETTINGS.jointLines),
+		uniformScale: bool(raw.uniformScale, DEFAULT_SETTINGS.uniformScale),
 		tool:
 			typeof raw.tool === "string" && isToolId(raw.tool)
 				? raw.tool

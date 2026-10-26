@@ -11,9 +11,15 @@
 import type { Camera } from "./lib/camera";
 import type { LabelFont, LabelTextAlign } from "./lib/document";
 import {
+	formatSweptAngle,
+	GIZMO_ARC_LABEL_FONT_PX,
 	GIZMO_CORNER_HALF_PX,
 	GIZMO_RING_RADIUS_PX,
 	type GizmoGeom,
+	type GizmoRotationState,
+	gizmoArcLabelPos,
+	gizmoArcRadius,
+	gizmoArcSweep,
 	gizmoCornerX,
 	gizmoCornerY,
 	gizmoRingX,
@@ -141,6 +147,13 @@ export interface SceneView {
 	 * corner handles, the rotate ring, and the faint box outline from it.
 	 */
 	gizmo(): GizmoGeom | null;
+	/**
+	 * Live transform-gizmo RING-drag rotation state (the angle-readout arc):
+	 * the drag's pivot and drag-start/current pointer angles, or null when no
+	 * ring drag is active. R-drag never produces it — each body rotates about
+	 * its own center, so no single arc represents that gesture.
+	 */
+	gizmoRotation(): GizmoRotationState | null;
 }
 
 export interface Renderer {
@@ -229,6 +242,13 @@ const LINE_GLYPH_TYPES: ReadonlySet<string> = new Set([
  */
 const STATIC_FILL = "rgba(152, 162, 179, 0.22)";
 const STATIC_STROKE_WIDTH_PX = 1.5;
+
+/**
+ * Ring-drag angle-readout scratch records (the rotation arc): module-level so
+ * the per-frame gizmo draw allocates nothing (P5 allocation card).
+ */
+const arcSweepScratch = { startAngle: 0, sweep: 0 };
+const arcLabelScratch = { x: 0, y: 0 };
 
 /** Trace a closed polygon path (caller starts/ends the path). */
 function tracePolyPath(
@@ -579,7 +599,8 @@ export function createRenderer(
 	 * ÷ zoom), drawn flat (no shadow — PRD R2: glow is a selection
 	 * affordance, and the outlines already carry it) above the selection
 	 * outlines. All math comes from gizmo.ts so the drawn handles ARE the
-	 * hitboxes; numbers only — the per-frame draw allocates nothing.
+	 * hitboxes; numbers only — the per-frame draw allocates nothing (the one
+	 * angle-label string builds only while a ring drag is live).
 	 */
 	function drawGizmo(zoom: number): void {
 		const scene = options.scene;
@@ -615,6 +636,38 @@ export function createRenderer(
 		ctx.beginPath();
 		ctx.arc(rx, ry, 1.5 / zoom, 0, Math.PI * 2);
 		ctx.fill();
+		// Ring-drag angle readout (the rotation arc): an accent arc around the
+		// box center from the drag-start to the current pointer angle, labeled
+		// with the signed swept angle to 1 decimal. Live state only via the
+		// scene adapter — no active ring drag draws nothing, and R-drag never
+		// produces state (each body rotates about its own center).
+		const rot = scene.gizmoRotation();
+		if (rot) {
+			gizmoArcSweep(rot.start, rot.current, arcSweepScratch);
+			ctx.lineWidth = 1.5 / zoom;
+			ctx.beginPath();
+			ctx.arc(
+				rot.cx,
+				rot.cy,
+				gizmoArcRadius(zoom),
+				arcSweepScratch.startAngle,
+				arcSweepScratch.startAngle + arcSweepScratch.sweep,
+				arcSweepScratch.sweep < 0,
+			);
+			ctx.stroke();
+			const label = formatSweptAngle(arcSweepScratch.sweep);
+			gizmoArcLabelPos(
+				rot.cx,
+				rot.cy,
+				arcSweepScratch.startAngle + arcSweepScratch.sweep,
+				zoom,
+				arcLabelScratch,
+			);
+			ctx.font = `${GIZMO_ARC_LABEL_FONT_PX / zoom}px system-ui, -apple-system, sans-serif`;
+			ctx.textAlign = "center";
+			ctx.textBaseline = "middle";
+			ctx.fillText(label, arcLabelScratch.x, arcLabelScratch.y);
+		}
 		ctx.restore();
 	}
 
