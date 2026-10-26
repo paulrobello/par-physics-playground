@@ -86,6 +86,9 @@ export interface SceneView {
 			rotA: number,
 			radiusB: number,
 			rotB: number,
+			/** The rack's live world axis (unit vector); 0, 0 when not a rack. */
+			axisX: number,
+			axisY: number,
 		) => void,
 	): void;
 	/**
@@ -622,6 +625,8 @@ export function createRenderer(
 				rotA,
 				radiusB,
 				rotB,
+				axisX,
+				axisY,
 			) => {
 				const isSel = selected.has(id);
 				ctx.shadowColor = isSel ? HOVER_GLOW : "transparent";
@@ -692,6 +697,56 @@ export function createRenderer(
 								wx2 + Math.cos(a) * (radiusB + tip),
 								wy2 + Math.sin(a) * (radiusB + tip),
 							);
+						}
+						ctx.stroke();
+					}
+					ctx.restore();
+					return;
+				}
+				if (jointType === "rack") {
+					// Rack-and-pinion (post-MVP): the axle line from the pinion
+					// center to the pitch foot, a tooth ring on the pinion
+					// (same convention as the gear's rim teeth), and a pitch-tick
+					// strip along the rack axis through the foot — decorative
+					// glyphs, never colliders. Stroke widths stay screen-constant
+					// (1/zoom); the tick pitch mirrors the pinion's tooth spacing
+					// so the strip reads as meshed with the ring.
+					ctx.save();
+					ctx.lineWidth = (isSel ? 2 : 1.2) / zoom;
+					ctx.beginPath();
+					ctx.moveTo(wx, wy);
+					ctx.lineTo(wx2, wy2);
+					ctx.stroke();
+					const tip = 1.5 / zoom;
+					if (radiusA > 0) {
+						const teeth = Math.min(
+							28,
+							Math.max(8, Math.round((Math.PI * 2 * radiusA) / 6)),
+						);
+						ctx.beginPath();
+						for (let i = 0; i < teeth; i++) {
+							const a = rotA + (i * Math.PI * 2) / teeth;
+							ctx.moveTo(
+								wx + Math.cos(a) * radiusA * 0.82,
+								wy + Math.sin(a) * radiusA * 0.82,
+							);
+							ctx.lineTo(
+								wx + Math.cos(a) * (radiusA + tip),
+								wy + Math.sin(a) * (radiusA + tip),
+							);
+						}
+						ctx.stroke();
+						// Pitch ticks along the rack axis: spaced at the pinion's
+						// tooth pitch, spanning ±1.2 radii around the foot, each
+						// a small perpendicular stroke (screen-constant half-height).
+						const spacing = (Math.PI * 2 * radiusA) / teeth;
+						const n = Math.floor((radiusA * 1.2) / spacing);
+						ctx.beginPath();
+						for (let i = -n; i <= n; i++) {
+							const bx = wx2 + axisX * spacing * i;
+							const by = wy2 + axisY * spacing * i;
+							ctx.moveTo(bx - axisY * tip, by + axisX * tip);
+							ctx.lineTo(bx + axisY * tip, by - axisX * tip);
 						}
 						ctx.stroke();
 					}

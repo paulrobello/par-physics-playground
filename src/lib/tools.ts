@@ -1355,7 +1355,9 @@ export class ToolSession {
 			// example), then the joint applies at that shared point — move +
 			// joint as one undo action (Paul, 2026-10-25).
 			const angularDrive =
-				this.jointKind === "gear" || this.jointKind === "belt";
+				this.jointKind === "gear" ||
+				this.jointKind === "belt" ||
+				this.jointKind === "rack";
 			const snapTarget = angularDrive
 				? this.events.pickBodyOnly?.(wx, wy)
 				: this.pick(wx, wy);
@@ -1363,10 +1365,14 @@ export class ToolSession {
 				if (
 					!snapTarget ||
 					snapTarget === bodyAId ||
-					this.events.bodyShape?.(snapTarget)?.kind !== "circle"
+					(this.jointKind === "rack"
+						? this.events.bodyShape?.(snapTarget)?.kind !== "box"
+						: this.events.bodyShape?.(snapTarget)?.kind !== "circle")
 				) {
 					showNotice(
-						"Gear and belt joints connect two distinct circles",
+						this.jointKind === "rack"
+							? "Rack & pinion connects a circle to a distinct box or line"
+							: "Gear and belt joints connect two distinct circles",
 						"error",
 					);
 					this.events.onCancelAction?.();
@@ -1527,7 +1533,8 @@ export class ToolSession {
 				mods.shift === true &&
 				this.jointKind !== "pulley" &&
 				this.jointKind !== "gear" &&
-				this.jointKind !== "belt"
+				this.jointKind !== "belt" &&
+				this.jointKind !== "rack"
 			) {
 				const stack = this.events.pickAllBodies?.(wx, wy) ?? [];
 				if (stack.length >= 2) {
@@ -1541,7 +1548,9 @@ export class ToolSession {
 				}
 			}
 			const angularDrive =
-				this.jointKind === "gear" || this.jointKind === "belt";
+				this.jointKind === "gear" ||
+				this.jointKind === "belt" ||
+				this.jointKind === "rack";
 			const hitId = angularDrive
 				? this.events.pickBodyOnly?.(wx, wy)
 				: this.pick(wx, wy);
@@ -1549,7 +1558,12 @@ export class ToolSession {
 				angularDrive &&
 				(!hitId || this.events.bodyShape?.(hitId)?.kind !== "circle")
 			) {
-				showNotice("Gear and belt joints connect two circles", "error");
+				showNotice(
+					this.jointKind === "rack"
+						? "Rack & pinion places a circle pinion first"
+						: "Gear and belt joints connect two circles",
+					"error",
+				);
 				this.events.onCancelAction?.();
 				return;
 			}

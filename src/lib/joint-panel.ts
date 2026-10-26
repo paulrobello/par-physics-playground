@@ -228,6 +228,14 @@ export function attachJointPanel(deps: JointPanelDeps): () => void {
 				<p class="joint-field">Drive: ${params.kind === "gear" ? "Opposite spins (mesh)" : "Same-direction (belt)"}</p>
 				<p class="joint-field">Delete and re-place to change the ratio.</p>
 			`;
+		} else if (params.kind === "rack") {
+			// Rack-and-pinion readouts (post-MVP): the pitch radius is
+			// READ-ONLY (the gear precedent — delete + re-place to change).
+			paramsEl.innerHTML = `
+				<p class="joint-field">Pitch radius: ${params.ratio.toFixed(3)}</p>
+				<p class="joint-field">Drive: pinion spin → rack slide</p>
+				<p class="joint-field">Delete and re-place to change the radius.</p>
+			`;
 		} else if (params.kind === "pulley") {
 			// Pulley readouts (post-MVP): rope length and wheel coordinates are
 			// READ-ONLY — the approved design locks the length at placement and

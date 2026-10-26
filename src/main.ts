@@ -227,6 +227,9 @@ const sceneView = {
 			rotA: number,
 			radiusB: number,
 			rotB: number,
+			/** The rack's live world axis (unit vector); 0, 0 when not a rack. */
+			axisX: number,
+			axisY: number,
 		) => void,
 	): void {
 		const w = world;
@@ -239,6 +242,8 @@ const sceneView = {
 			let rotA = 0;
 			let radiusB = 0;
 			let rotB = 0;
+			let axisX = 0;
+			let axisY = 0;
 			if (gearDrive) {
 				const shapeA = w.shapeOf(e.bodyA);
 				const shapeB = e.bodyB ? w.shapeOf(e.bodyB) : undefined;
@@ -246,6 +251,20 @@ const sceneView = {
 				if (shapeB?.kind === "circle") radiusB = shapeB.radius;
 				rotA = w.bodies.get(e.bodyA)?.rotation() ?? 0;
 				rotB = e.bodyB ? (w.bodies.get(e.bodyB)?.rotation() ?? 0) : 0;
+			} else if (e.params.kind === "rack") {
+				// The pinion's pitch radius and live rotation feed the tooth
+				// ring; the rack-local axis rotates with the rack's live pose.
+				const shapeA = w.shapeOf(e.bodyA);
+				if (shapeA?.kind === "circle") radiusA = shapeA.radius;
+				rotA = w.bodies.get(e.bodyA)?.rotation() ?? 0;
+				const rack = e.bodyB ? w.bodies.get(e.bodyB) : undefined;
+				if (rack) {
+					const rrot = rack.rotation();
+					axisX =
+						e.params.axisX * Math.cos(rrot) - e.params.axisY * Math.sin(rrot);
+					axisY =
+						e.params.axisX * Math.sin(rrot) + e.params.axisY * Math.cos(rrot);
+				}
 			}
 			fn(
 				e.id,
@@ -261,6 +280,8 @@ const sceneView = {
 				rotA,
 				radiusB,
 				rotB,
+				axisX,
+				axisY,
 			);
 		});
 	},

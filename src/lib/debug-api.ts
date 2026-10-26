@@ -9,7 +9,12 @@ import type { BodyShape, DocEntity } from "./document";
 import type { RopeChainSpawned } from "./interaction";
 import { placeRopeChain } from "./interaction";
 import type { JointEntity, JointParams } from "./joint";
-import { localPointToWorld, makeJoint, makePlacedJoint } from "./joint";
+import {
+	localPointToWorld,
+	makeJoint,
+	makePlacedJoint,
+	rackPlacement,
+} from "./joint";
 import type { Material } from "./material";
 import { MATERIAL_DEFAULT_ID } from "./material";
 import type { TimeScale } from "./sim-controls";
@@ -128,7 +133,7 @@ export interface DebugApi {
 	 */
 	placeJoint(
 		id: DocumentId,
-		kind: "pin" | "weld" | "rod" | "slider" | "motor" | "spring",
+		kind: "pin" | "weld" | "rod" | "slider" | "motor" | "spring" | "rack",
 		bodyAId: DocumentId,
 		bodyBId: DocumentId | null,
 		ax: number,
@@ -378,6 +383,14 @@ export function installDebugApi(
 							rot: b.rotation(),
 						}
 					: null,
+				undefined,
+				undefined,
+				kind === "rack"
+					? rackPlacement(
+							world.shapeOf(bodyAId),
+							bodyBId ? world.shapeOf(bodyBId) : undefined,
+						)
+					: undefined,
 			);
 			return entity ? world.spawnJoint(entity) : false;
 		},

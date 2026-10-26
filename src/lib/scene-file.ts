@@ -225,8 +225,13 @@ function checkEntity(raw: unknown, index: number): string | null {
 					return `joint ${String(e.id)} params.${key}: not finite`;
 				}
 			}
-			if (params.kind === "gear" || params.kind === "belt") {
-				// Radius ratio in (0, maxHalfExtent]: both circles' radii are
+			if (
+				params.kind === "gear" ||
+				params.kind === "belt" ||
+				params.kind === "rack"
+			) {
+				// Radius ratio (gear/belt) or pitch radius (rack) in
+				// (0, maxHalfExtent]: both coupled circles' radii are
 				// shape-bounded, so their ratio is too; the phase anchors are
 				// angles, covered by the finite check above.
 				const ratio = params.ratio;
@@ -237,6 +242,21 @@ function checkEntity(raw: unknown, index: number): string | null {
 					ratio > SCENE_BOUNDS.maxHalfExtent
 				) {
 					return `joint ${String(e.id)} params.ratio ${String(ratio)} outside (0, ${SCENE_BOUNDS.maxHalfExtent}]`;
+				}
+			}
+			if (params.kind === "rack") {
+				// The rack-local axis is a stored UNIT vector (components in
+				// [−1, 1] by construction) and the coupling sign is ±1 exactly;
+				// anything else is a mistyped record.
+				for (const key of ["axisX", "axisY"] as const) {
+					const v = params[key];
+					if (typeof v !== "number" || !Number.isFinite(v) || Math.abs(v) > 1) {
+						return `joint ${String(e.id)} params.${key} ${String(v)} outside [−1, 1]`;
+					}
+				}
+				const sign = params.sign;
+				if (sign !== 1 && sign !== -1) {
+					return `joint ${String(e.id)} params.sign ${String(sign)} is not ±1`;
 				}
 			}
 			if (params.kind === "pulley") {

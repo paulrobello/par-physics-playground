@@ -18,6 +18,7 @@ import {
 	isPlaceableJointKind,
 	makeJoint,
 	makePlacedJoint,
+	rackPlacement,
 	worldPointToLocal,
 } from "./joint";
 import { MATERIAL_DEFAULT_ID } from "./material";
@@ -712,6 +713,7 @@ export function createToolEvents(
 				shapeA?.kind === "circle" && shapeB?.kind === "circle"
 					? { radiusA: shapeA.radius, radiusB: shapeB.radius }
 					: undefined,
+				spec.jointKind === "rack" ? rackPlacement(shapeA, shapeB) : undefined,
 			);
 			if (!entity || !world.spawnJoint(entity)) {
 				deps?.cancelAction?.();

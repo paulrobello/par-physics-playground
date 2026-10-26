@@ -115,6 +115,12 @@ const PULLEY_VEL_B = { x: 0, y: 0 };
 const PULLEY_POINT_A = { x: 0, y: 0 };
 const PULLEY_POINT_B = { x: 0, y: 0 };
 const PULLEY_IMPULSE = { x: 0, y: 0 };
+/** Rack-and-pinion per-tick scratch (the pulley's zero-allocation convention). */
+const RACK_COM_A = { x: 0, y: 0 };
+const RACK_COM_B = { x: 0, y: 0 };
+const RACK_VEL_B = { x: 0, y: 0 };
+const RACK_POINT_B = { x: 0, y: 0 };
+const RACK_IMPULSE = { x: 0, y: 0 };
 
 let nextFragmentId = 1;
 
@@ -162,6 +168,23 @@ export class PhysicsWorld {
 			lastB: number;
 			deltaA: number;
 			deltaB: number;
+		}
+	>();
+	/**
+	 * Rack-and-pinion phase history (the gearPhases accumulator convention,
+	 * keyed by joint id): the rack anchor's along-axis displacement and the
+	 * pinion's accumulated rotation SINCE SPAWN (lastP/lastA are the previous
+	 * reads; deltaD/deltaA the wrapped-accumulated totals). Anchored at
+	 * spawnJoint, deleted in removeJoint, read in applyRackTick.
+	 */
+	private readonly rackPhases = new Map<
+		DocumentId,
+		{
+			lastPX: number;
+			lastPY: number;
+			lastA: number;
+			deltaD: number;
+			deltaA: number;
 		}
 	>();
 	/**
@@ -544,6 +567,45 @@ export class PhysicsWorld {
 			this.doc.add(entity);
 			return true;
 		}
+		if (entity.params.kind === "rack") {
+			// Rack-and-pinion (post-MVP): a DOC-ONLY constraint behind the PRD
+			// R6 custom-constraint seam, exactly like the gear/belt pair — no
+			// Rapier impulse joint exists for the linear-angular coupling, the
+			// per-tick solve in {@link applyRackTick} does the constraining,
+			// and the removal cascade works through the document. Shape gate:
+			// circle pinion + box rack (the placement proof re-checked, since
+			// rebuild is a different entry path). Both endpoints wake (the gear
+			// precedent): the constraint acts on live velocities only, so a
+			// sleeping pair would hang frozen at its placed pose.
+			const a = this.shapeOf(entity.bodyA);
+			const b = entity.bodyB ? this.shapeOf(entity.bodyB) : undefined;
+			if (
+				entity.bodyA === entity.bodyB ||
+				!bodyB ||
+				a?.kind !== "circle" ||
+				b?.kind !== "box" ||
+				a.radius <= 0
+			)
+				return false;
+			const anchor = localPointToWorld(
+				entity.anchorB.x,
+				entity.anchorB.y,
+				bodyB.translation().x,
+				bodyB.translation().y,
+				bodyB.rotation(),
+			);
+			this.rackPhases.set(entity.id, {
+				lastPX: anchor.x,
+				lastPY: anchor.y,
+				lastA: bodyA.rotation(),
+				deltaD: 0,
+				deltaA: 0,
+			});
+			bodyA.wakeUp();
+			bodyB.wakeUp();
+			this.doc.add(entity);
+			return true;
+		}
 		if (entity.params.kind === "pulley") {
 			// Fixed pulley (post-MVP): a DOC-ONLY constraint behind the PRD R6
 			// custom-constraint seam — no Rapier impulse joint exists for a rope
@@ -743,6 +805,7 @@ export class PhysicsWorld {
 	 */
 	removeJoint(id: DocumentId): void {
 		this.gearPhases.delete(id);
+		this.rackPhases.delete(id);
 		const joint = this.joints.get(id);
 		if (joint) {
 			this.world.removeImpulseJoint(joint, true);
@@ -1514,6 +1577,73 @@ export class PhysicsWorld {
 	};
 
 	/**
+	 * Rack-and-pinion fixed-tick walk (the applyGearTick convention — phase
+	 * history allocated at spawn, never here): a velocity-level LINEAR-
+	 * ANGULAR constraint at the pitch radius. The gear arc-length impulse
+	 * law (solveGearImpulse, same Baumgarte/slop/cap constants) is applied
+	 * through a rack-axis Jacobian: C = Δd − sign·r·Δθ with Δd the rack
+	 * anchor's along-axis displacement and Δθ the pinion's accumulated
+	 * rotation since spawn (both from per-tick wrapped reads, anchored in
+	 * spawnJoint), so the anchored phase keeps drawn teeth meshed. The rack
+	 * impulse is a LINEAR impulse λ·u applied AT the anchor point (a point
+	 * on the rack's own long axis, so it torques only if the rack rotates),
+	 * and the pinion takes the torque impulse −sign·r·λ — the two-sided
+	 * exchange: a spinning pinion drives the rack at v = −sign·r·ω, a pushed
+	 * rack spins the pinion, a static pinion locks the rack along the axis,
+	 * and a static rack stops the pinion (K = 0 when both are static).
+	 */
+	private readonly applyRackTick = (e: JointEntity): void => {
+		if (e.params.kind !== "rack") return;
+		const a = this.bodies.get(e.bodyA);
+		const b = e.bodyB ? this.bodies.get(e.bodyB) : undefined;
+		const state = this.rackPhases.get(e.id);
+		const shapeB = e.bodyB ? this.shapeOf(e.bodyB) : undefined;
+		if (!a || !b || !state || shapeB?.kind !== "box") return;
+		// Live world axis: the stored rack-local axis rotated by the rack.
+		const rot = b.rotation();
+		const cos = Math.cos(rot);
+		const sin = Math.sin(rot);
+		const ux = e.params.axisX * cos - e.params.axisY * sin;
+		const uy = e.params.axisX * sin + e.params.axisY * cos;
+		// Rack anchor point (body-local → world, inlined — the pulley's
+		// scratch-object convention keeps this walk allocation-free).
+		const bt = b.translation();
+		const px = e.anchorB.x * cos - e.anchorB.y * sin + bt.x;
+		const py = e.anchorB.x * sin + e.anchorB.y * cos + bt.y;
+		// Phase accumulation since spawn: along-axis displacement and the
+		// pinion's wrapped-accumulated rotation.
+		state.deltaD += (px - state.lastPX) * ux + (py - state.lastPY) * uy;
+		state.deltaA += wrapAngleDelta(a.rotation() - state.lastA);
+		state.lastPX = px;
+		state.lastPY = py;
+		state.lastA = a.rotation();
+		// Coupling coefficient sign·r and the Jacobian levers.
+		const k = e.params.sign * e.params.ratio;
+		a.worldCom(RACK_COM_A);
+		b.worldCom(RACK_COM_B);
+		const kB = (px - RACK_COM_B.x) * uy - (py - RACK_COM_B.y) * ux;
+		RACK_POINT_B.x = px;
+		RACK_POINT_B.y = py;
+		const vB = b.velocityAtPoint(RACK_POINT_B, RACK_VEL_B);
+		const rate = vB.x * ux + vB.y * uy - k * a.angvel();
+		const kk =
+			b.invMass() +
+			kB * kB * b.effectiveWorldInvInertia() +
+			k * k * a.effectiveWorldInvInertia();
+		const j = solveGearImpulse(
+			state.deltaD - k * state.deltaA,
+			rate,
+			kk,
+			SIM_DT_SECONDS,
+		);
+		if (j === 0) return;
+		RACK_IMPULSE.x = j * ux;
+		RACK_IMPULSE.y = j * uy;
+		b.applyImpulseAtPoint(RACK_IMPULSE, RACK_POINT_B, true);
+		a.applyTorqueImpulse(-k * j, true);
+	};
+
+	/**
 	 * One fixed tick: physics, then heat and events, then culling. The
 	 * exhaust-heat pass runs right AFTER the Rapier tick — Rapier's
 	 * broad-phase fills on step, so a ray cast before the first step sees an
@@ -1525,6 +1655,7 @@ export class PhysicsWorld {
 		this.applyThrusters();
 		this.applyPulleyTension();
 		this.doc.eachJoint(this.applyGearTick);
+		this.doc.eachJoint(this.applyRackTick);
 		this.world.step(this.contactEvents);
 		this.applyThrusterHeat();
 		if (this.brittleColliders.size > 0 || this.burning.size > 0)

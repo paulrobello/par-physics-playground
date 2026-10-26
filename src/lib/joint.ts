@@ -21,6 +21,7 @@
  * machinery below is type-agnostic.
  */
 import type RAPIER from "@dimforge/rapier2d-compat";
+import type { BodyShape } from "./document";
 import type { Vec2 } from "./triangulate";
 import type { DocumentId } from "./world";
 
@@ -40,7 +41,8 @@ export type JointType =
 	| "rope"
 	| "pulley"
 	| "gear"
-	| "belt";
+	| "belt"
+	| "rack";
 
 /**
  * Per-type parameters, discriminated on `kind` (matches the entity's
@@ -166,6 +168,34 @@ export type JointParams =
 			 */
 			readonly phaseA: number;
 			readonly phaseB: number;
+	  }
+	| {
+			readonly kind: "rack";
+			/**
+			 * The pitch radius = the pinion circle's radius, captured at
+			 * placement. NOT panel-editable (the gear precedent: delete +
+			 * re-place to change it); the panel shows it read-only.
+			 */
+			readonly ratio: number;
+			/** Pinion and rack rotations (radians) at placement — the phase
+			 * anchors the per-tick solve holds (drawn teeth stay meshed). */
+			readonly phasePinion: number;
+			readonly phaseRack: number;
+			/**
+			 * The rack's long axis in rack body-LOCAL coordinates (unit
+			 * vector; rotates with the rack, like the slider's axis). The
+			 * long dimension of the box shape — line-tool beams commit as
+			 * boxes, so "box or line" is one shape kind here.
+			 */
+			readonly axisX: number;
+			readonly axisY: number;
+			/**
+			 * ±1: which side of the pinion center the rack axis passes at
+			 * placement (the sign of pinion→foot crossed with the world
+			 * axis), so the coupled rate is v = −sign·r·ω — rack below the
+			 * pinion (y-down) gives v = −r·ω.
+			 */
+			readonly sign: 1 | -1;
 	  };
 
 /**
@@ -239,7 +269,8 @@ export type PlaceableJointKind =
 	| "rope"
 	| "pulley"
 	| "gear"
-	| "belt";
+	| "belt"
+	| "rack";
 
 /** DOM-validation guard for the tool rail's joint-kind buttons. */
 export function isPlaceableJointKind(
@@ -255,7 +286,8 @@ export function isPlaceableJointKind(
 		value === "rope" ||
 		value === "pulley" ||
 		value === "gear" ||
-		value === "belt"
+		value === "belt" ||
+		value === "rack"
 	);
 }
 
@@ -421,7 +453,32 @@ export const JOINT_TYPE_LABELS: Record<JointType, string> = {
 	pulley: "Pulley",
 	gear: "Gear",
 	belt: "Belt",
+	rack: "Rack & pinion",
 };
+
+/**
+ * Rack-and-pinion placement proof ({@link makePlacedJoint}'s `rack`
+ * record): the pinion must be a CIRCLE (radius is the pitch radius) and the
+ * rack a BOX (line-tool beams commit as boxes; polygons have no single long
+ * axis and refuse). The axis is the box's long dimension in rack body-local
+ * coordinates (a square box reads wide). Undefined when the pair does not
+ * qualify — the caller's refused placement. The ONE shape gate shared by
+ * the interaction layer and the debug API.
+ */
+export function rackPlacement(
+	shapeA: BodyShape | undefined,
+	shapeB: BodyShape | undefined,
+): { radiusA: number; axisX: number; axisY: number } | undefined {
+	if (shapeA?.kind !== "circle" || shapeB?.kind !== "box") return undefined;
+	const radius = shapeA.radius;
+	if (!Number.isFinite(radius) || radius <= 0) return undefined;
+	const alongX = shapeB.halfWidth >= shapeB.halfHeight;
+	return {
+		radiusA: radius,
+		axisX: alongX ? 1 : 0,
+		axisY: alongX ? 0 : 1,
+	};
+}
 
 /**
  * Build a joint entity from a TWO-CLICK placement: `p1` is the arming click
@@ -448,6 +505,7 @@ export function makePlacedJoint(
 	transformB: { x: number; y: number; rot: number } | null,
 	wheel?: Vec2,
 	radii?: { radiusA: number; radiusB: number },
+	rack?: { radiusA: number; axisX: number; axisY: number },
 ): JointEntity | undefined {
 	let params: JointParams;
 	let pivot: Vec2;
@@ -564,6 +622,63 @@ export function makePlacedJoint(
 			};
 			pivot = { x: transformA.x, y: transformA.y };
 			endpointB = { x: transformB.x, y: transformB.y };
+			break;
+		}
+		case "rack": {
+			// Circle pinion + box rack (line-tool beams commit as boxes). The
+			// axis is the rack's long dimension in rack-LOCAL coordinates (the
+			// slider's body-local axis precedent); the rack anchor is the foot
+			// of the perpendicular from the pinion center onto the axis line;
+			// ratio is the pitch radius (the pinion radius); the coupling sign
+			// is which side of the pinion the axis passes at placement. The
+			// caller carries `rack` only when the clicks landed circle-then-box
+			// — a missing or degenerate record is the refused placement.
+			const r = rack?.radiusA;
+			const ax = rack?.axisX;
+			const ay = rack?.axisY;
+			if (
+				!bodyB ||
+				bodyA === bodyB ||
+				!transformB ||
+				r === undefined ||
+				!Number.isFinite(r) ||
+				r <= 0 ||
+				ax === undefined ||
+				ay === undefined ||
+				!Number.isFinite(ax) ||
+				!Number.isFinite(ay)
+			) {
+				return undefined;
+			}
+			const len = Math.hypot(ax, ay);
+			if (len <= 1e-9) return undefined;
+			const axisX = ax / len;
+			const axisY = ay / len;
+			// World axis at placement and the foot of the perpendicular from
+			// the pinion center onto the axis line through the rack center.
+			const cos = Math.cos(transformB.rot);
+			const sin = Math.sin(transformB.rot);
+			const ux = axisX * cos - axisY * sin;
+			const uy = axisX * sin + axisY * cos;
+			const dx = transformA.x - transformB.x;
+			const dy = transformA.y - transformB.y;
+			const along = dx * ux + dy * uy;
+			const footX = transformB.x + ux * along;
+			const footY = transformB.y + uy * along;
+			params = {
+				kind: "rack",
+				ratio: r,
+				phasePinion: transformA.rot,
+				phaseRack: transformB.rot,
+				axisX,
+				axisY,
+				sign:
+					(footX - transformA.x) * uy - (footY - transformA.y) * ux >= 0
+						? 1
+						: -1,
+			};
+			pivot = { x: transformA.x, y: transformA.y };
+			endpointB = { x: footX, y: footY };
 			break;
 		}
 		default:
